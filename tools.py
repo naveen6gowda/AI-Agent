@@ -1,12 +1,15 @@
 import json
+from dotenv import load_dotenv
 import os
 
 import requests
-from openai import OpenAI
+from anthropic import Anthropic
 from pydantic import BaseModel, Field
 
-client = OpenAI(base_url="http://192.168.178.75:8383/v1",  # Your llama.cpp server URL
-    api_key="c34252bf3982850fc5a93c093bb7adb2"  # llama.cpp doesn't require authentication
+load_dotenv()
+
+client = Anthropic(
+    api_key=os.getenv("CLAUDE_API_KEY")
 )
 
 """
@@ -33,20 +36,15 @@ def get_weather(latitude, longitude):
 
 tools = [
     {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get current temperature for provided coordinates in celsius.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "latitude": {"type": "number"},
-                    "longitude": {"type": "number"},
-                },
-                "required": ["latitude", "longitude"],
-                "additionalProperties": False,
+        "name": "get_weather",
+        "description": "Get current temperature for provided coordinates in celsius.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number"},
+                "longitude": {"type": "number"},
             },
-            "strict": True,
+            "required": ["latitude", "longitude"],
         },
     }
 ]
@@ -54,12 +52,13 @@ tools = [
 system_prompt = "You are a helpful weather assistant."
 
 messages = [
-    {"role": "system", "content": system_prompt},
     {"role": "user", "content": "What's the weather like in Paris today?"},
 ]
 
-completion = client.chat.completions.create(
-    model="active",
+completion = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    system=system_prompt,
     messages=messages,
     tools=tools,
 )
@@ -68,7 +67,8 @@ completion = client.chat.completions.create(
 # Step 2: Model decides to call function(s)
 # --------------------------------------------------------------
 
-completion.model_dump()
+# Display the response
+print(completion)
 
 # --------------------------------------------------------------
 # Step 3: Execute get_weather function
@@ -80,41 +80,37 @@ def call_function(name, args):
         return get_weather(**args)
 
 
-for tool_call in completion.choices[0].message.tool_calls:
-    name = tool_call.function.name
-    args = json.loads(tool_call.function.arguments)
-    messages.append(completion.choices[0].message)
-
-    result = call_function(name, args)
-    messages.append(
-        {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)}
-    )
+# Process tool use blocks
+for block in completion.content:
+    if block.type == "tool_use":
+        tool_call = block
+        name = tool_call.name
+        args = tool_call.input
+        messages.append({"role": "assistant", "content": completion.content})
+        
+        result = call_function(name, args)
+        messages.append(
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_call.id, "content": json.dumps(result)}]}
+        )
 
 # --------------------------------------------------------------
 # Step 4: Supply result and call model again
 # --------------------------------------------------------------
 
 
-class WeatherResponse(BaseModel):
-    temperature: float = Field(
-        description="The current temperature in celsius for the given location."
-    )
-    response: str = Field(
-        description="A natural language response to the user's question."
-    )
-
-
-completion_2 = client.beta.chat.completions.parse(
-    model="active",
+completion_2 = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    system=system_prompt,
     messages=messages,
     tools=tools,
-    response_format=WeatherResponse,
 )
 
 # --------------------------------------------------------------
 # Step 5: Check model response
 # --------------------------------------------------------------
 
-final_response = completion_2.choices[0].message.parsed
-final_response.temperature
-final_response.response
+# Extract the text response
+for block in completion_2.content:
+    if hasattr(block, "text"):
+        print(block.text)

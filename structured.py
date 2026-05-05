@@ -42,3 +42,4 @@ event = completion.choices[0].message.parsed
 event.name
 event.date
 event.participants
+print(f"Event: {event.name}, Date: {event.date}, Participants: {', '.join(event.participants)}")
