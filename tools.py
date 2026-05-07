@@ -4,7 +4,6 @@ import os
 
 import requests
 from anthropic import Anthropic
-from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -13,7 +12,7 @@ client = Anthropic(
 )
 
 """
-docs: https://platform.openai.com/docs/guides/function-calling
+docs: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview
 """
 
 # --------------------------------------------------------------
@@ -78,7 +77,7 @@ print(completion)
 def call_function(name, args):
     if name == "get_weather":
         return get_weather(**args)
-
+    raise ValueError(f"Unknown function: {name}")
 
 # Process tool use blocks
 for block in completion.content:
