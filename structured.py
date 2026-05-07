@@ -1,11 +1,7 @@
-import os
-
 from openai import OpenAI
 from pydantic import BaseModel
 
-client = OpenAI(base_url="http://192.168.178.75:8383/v1",  # Your llama.cpp server URL
-    api_key="c34252bf3982850fc5a93c093bb7adb2"  # llama.cpp doesn't require authentication
-)
+client = OpenAI()
 
 
 # --------------------------------------------------------------
@@ -23,7 +19,7 @@ class CalendarEvent(BaseModel):
 # --------------------------------------------------------------
 
 completion = client.beta.chat.completions.parse(
-    model="active",
+    model="gpt-4.1-mini",
     messages=[
         {"role": "system", "content": "Extract the event information."},
         {
