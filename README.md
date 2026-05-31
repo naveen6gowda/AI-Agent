@@ -226,7 +226,7 @@ no-cloud Alexa trigger trick.
 ## 🗂️ Project layout
 
 ```
-python-for-ai/
+AI-Agent/
 ├── README.md                 ← you are here
 ├── .gitignore
 └── Agent_AI/                 ← the agent (full source)
