@@ -24,7 +24,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from tools import (LXC
+from tools import (
     check_proxmox_status as _check_proxmox_status,
     get_ha_entity as _get_ha_entity,
     restart_lxc as _restart_lxc,
