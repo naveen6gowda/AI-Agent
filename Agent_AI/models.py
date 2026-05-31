@@ -38,8 +38,8 @@ load_dotenv()
 _ANTHROPIC_AGENT_MODEL = os.getenv("ANTHROPIC_AGENT_MODEL", "claude-sonnet-4-6")
 
 # Defaults reflect this homelab's deployment (LXC 101 "ollama", llama-server
-# started with `--alias active` on port 8383). Overridable via .env.
-_LLAMACPP_BASE_URL = os.getenv("LLAMACPP_BASE_URL", "http://192.168.178.75:8383/v1")
+# started with `--alias active`). Overridable via .env.
+_LLAMACPP_BASE_URL = os.getenv("LLAMACPP_BASE_URL", "http://llm.lan/v1")
 _LLAMACPP_MODEL = os.getenv("LLAMACPP_MODEL", "active")
 _LLAMACPP_API_KEY = os.getenv("LLAMACPP_API_KEY", "not-used")
 

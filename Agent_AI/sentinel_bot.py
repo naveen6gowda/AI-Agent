@@ -68,7 +68,7 @@ if not _RAW_CHAT_IDS:
 
 _TG_BASE = f"https://api.telegram.org/bot{_TG_TOKEN}"
 # Allow multiple authorized chats by comma-separating in env. Defaults
-# to single-user (just Naveen's chat id).
+# to single-user (just the owner's chat id).
 AUTHORIZED_CHAT_IDS = {c.strip() for c in _RAW_CHAT_IDS.split(",") if c.strip()}
 
 APPROVAL_TIMEOUT_S = int(os.getenv("APPROVAL_TIMEOUT_S", "120"))

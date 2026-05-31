@@ -42,7 +42,7 @@ from tools import _ha_request, _audit  # reuse HA REST helper + audit log
 # Config
 # ---------------------------------------------------------------------
 # notify.<this> is the Alexa Media Player TTS service for the target Echo.
-ALEXA_TARGET = os.getenv("VOICE_ALEXA_TARGET", "alexa_media_naveen_s_echo_dot")
+ALEXA_TARGET = os.getenv("VOICE_ALEXA_TARGET", "alexa_media_echo_dot")
 # "tts" speaks immediately; "announce" prepends the Alexa chime.
 ALEXA_TYPE = os.getenv("VOICE_ALEXA_TYPE", "tts")
 # Keep spoken answers short — an Echo reading a 2000-char essay is painful.

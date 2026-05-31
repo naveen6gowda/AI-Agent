@@ -3,10 +3,10 @@ voice_server.py — Phase 4c HTTP bridge: HA → Sentinel → Alexa.
 
 A tiny FastAPI service so a Home Assistant automation can hand a voice
 command to Sentinel and have the Echo speak the answer. Runs on this LXC
-(LXC 106, 192.168.178.106) alongside the bot; HA reaches it over the LAN.
+(LXC 106, sentinel.lan) alongside the bot; HA reaches it over the LAN.
 
     "Alexa, <phrase>" → Alexa Routine → HA automation
-        → POST http://192.168.178.106:8099/voice
+        → POST http://sentinel.lan/voice
            {"intent": "status", "text": "", "speak": true}
         → this server runs the intent (Gemma for the canned checks; Claude,
           read-only, for free-form "ask") and speaks the result on the Echo

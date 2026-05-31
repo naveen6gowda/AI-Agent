@@ -5,7 +5,7 @@ Sentinel's voice path is Alexa-native, the same shape as controlling a light
 
 ```
 "Alexa, <phrase>"  →  Alexa Routine  →  HA automation/script
-   →  POST http://192.168.178.106:8099/voice  →  Sentinel runs the intent
+   →  POST http://sentinel.lan/voice  →  Sentinel runs the intent
    →  Echo speaks the answer (Alexa Media Player TTS)
 ```
 
@@ -14,13 +14,13 @@ common commands (status / backups / energy / disks / who's home) run the
 local monitors and summarize on Gemma — they cost **zero Claude tokens** and
 work even when the Anthropic balance is empty.
 
-## 1. Sentinel side (this LXC, 192.168.178.106)
+## 1. Sentinel side (this LXC, sentinel.lan)
 
 Set a shared token in `/opt/sentinel/.env`:
 
 ```
 VOICE_SERVER_TOKEN=choose-a-long-random-string
-VOICE_ALEXA_TARGET=alexa_media_naveen_s_echo_dot   # notify.<this> = your Echo
+VOICE_ALEXA_TARGET=alexa_media_echo_dot   # notify.<this> = your Echo
 VOICE_SERVER_PORT=8099
 ```
 
@@ -30,7 +30,7 @@ Install and start the service:
 sudo cp /opt/sentinel/systemd/sentinel-voice.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now sentinel-voice.service
-curl -s localhost:8099/health | jq .        # {"ok":true,"intents":[...]}
+curl -s localhost:<port>/health | jq .        # {"ok":true,"intents":[...]}
 ```
 
 ## 2. Home Assistant side
@@ -40,7 +40,7 @@ curl -s localhost:8099/health | jq .        # {"ok":true,"intents":[...]}
 ```yaml
 rest_command:
   sentinel_voice:
-    url: "http://192.168.178.106:8099/voice"
+    url: "http://sentinel.lan/voice"
     method: POST
     headers:
       Authorization: !secret sentinel_voice_token   # put 'Bearer <token>' in secrets.yaml
@@ -102,7 +102,7 @@ Add this single automation to `automations.yaml`:
   description: Dispatch sentinel_* scripts when Alexa hears a sentinel phrase.
   triggers:
     - trigger: state
-      entity_id: media_player.naveen_s_echo_dot   # one entry per Echo
+      entity_id: media_player.echo_dot   # one entry per Echo
       attribute: last_called_summary
   conditions:
     - condition: template
@@ -195,8 +195,8 @@ are missing. That's the upgrade path when fixed commands aren't enough.
 TOKEN=choose-a-long-random-string
 # run an intent but DON'T make the Echo talk:
 curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"intent":"status","speak":false}' localhost:8099/voice | jq .
+  -d '{"intent":"status","speak":false}' localhost:<port>/voice | jq .
 # make the Echo actually speak a test line:
 curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"text":"Sentinel voice is online."}' localhost:8099/speak | jq .
+  -d '{"text":"Sentinel voice is online."}' localhost:<port>/speak | jq .
 ```

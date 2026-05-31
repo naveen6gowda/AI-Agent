@@ -28,7 +28,7 @@ services:
     restart_policy: never         # restarting the router = whole-house outage
     endpoints:
       - name: web-ui
-        host: 10.0.0.1
+        host: router.lan
         port: 443
         proto: https
         path: /
@@ -45,7 +45,7 @@ services:
     restart_policy: ask
     endpoints:
       - name: api
-        host: 10.0.0.20
+        host: homeassistant.lan
         port: 8123
         proto: http
         path: /api/
@@ -62,7 +62,7 @@ services:
     restart_policy: ask
     endpoints:
       - name: openai-api
-        host: 10.0.0.30
+        host: llm.lan
         port: 8383
         proto: http
         path: /v1/models
@@ -78,7 +78,7 @@ services:
     restart_policy: ask
     endpoints:
       - name: dns
-        host: 10.0.0.50
+        host: docker.lan
         port: 53
         proto: tcp               # plain TCP-connect probe (no HTTP)
 
@@ -86,7 +86,7 @@ services:
 proxmox_host:
   node: pve
   ssh_user: root
-  ssh_host: 10.0.0.10
+  ssh_host: pve.lan
   ssh_port: 22
   disks_to_monitor:
     - /dev/sda

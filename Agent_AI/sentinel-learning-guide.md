@@ -524,7 +524,7 @@ factories:
 - `agent_llm()` -> `ChatAnthropic` (Claude). For anything that calls
   `.bind_tools()` or loops.
 - `helper_llm()` -> `ChatOpenAI` pointed at your local llama.cpp server
-  (`http://192.168.178.75:8383/v1`). For single-shot summarize / classify.
+  (`http://llm.lan/v1`). For single-shot summarize / classify.
 
 The docstring states the why: Gemma-4B cannot reliably call structured tools
 across multi-turn loops (it hallucinates tool names or breaks JSON), but it is
@@ -752,7 +752,7 @@ IPs, config keys) with the text. The flow:
             search_docs tool)
 ```
 
-- `_tokenize` keeps internal dots so `192.168.178.9` and
+- `_tokenize` keeps internal dots so `router.lan` and
   `sensor.refrigerator_total_energy` survive as single tokens.
 - `_chunk_text` groups paragraphs under their nearest markdown heading — the
   heading becomes a citation breadcrumb.
@@ -826,7 +826,7 @@ The chain:
 
 ```
   "Alexa, <phrase>" -> Alexa Routine -> HA automation
-       -> POST http://192.168.178.106:8099/voice  {"intent":"status"}
+       -> POST http://sentinel.lan/voice  {"intent":"status"}
        -> voice_server.py -> voice.handle_intent() -> answer string
        -> speak_on_alexa() -> Echo speaks it (Alexa Media Player TTS)
 ```
@@ -864,7 +864,7 @@ place. systemd runs everything:
 ```
   systemd
    |-- sentinel-bot.service        (always on)  -- Telegram chat
-   |-- sentinel-voice.service      (always on)  -- Alexa bridge :8099
+   |-- sentinel-voice.service      (always on)  -- Alexa bridge
    +-- timers --+- reachability  every 5 min  -- alert if critical down
                 |- docker        every 10 min -- alert if container down
                 |- smart         02:30 nightly -- alert if disk failing

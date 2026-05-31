@@ -21,16 +21,16 @@ companion for the docs search. Keep them in sync when you change the catalog.
 
 ### OPNSense (vmid 105, qemu) — critical, restart: never
 Router / firewall / DHCP / VLAN gateway. Losing it = no internet, so the
-agent never restarts it. Web UI at https://192.168.178.9 (self-signed TLS).
+agent never restarts it. Web UI at https://router.lan (self-signed TLS).
 Backups should be no older than 24h.
 
 ### HomeAssistant (vmid 100, qemu) — critical, restart: ask
 Home Assistant Core — automations, energy, presence. API at
-http://192.168.50.54:8123/api/ (auth via `HA_TOKEN`). Backups ≤ 24h.
+http://homeassistant.lan/api/ (auth via `HA_TOKEN`). Backups ≤ 24h.
 
 ### ollama (vmid 101, lxc) — high, restart: ask
 llama.cpp server backing `helper_llm()` — the local Gemma the monitors and
-RAG generation use. OpenAI-compatible API at http://192.168.178.75:8383/v1
+RAG generation use. OpenAI-compatible API at http://llm.lan/v1
 (auth via `LLAMACPP_API_KEY`). It serves a chat model only (no embeddings).
 
 ### Debian13 (vmid 103, qemu) — high, restart: ask
@@ -38,8 +38,8 @@ Docker host running ~27 containers (live count via Portainer): AdGuard DNS (the 
 resolver), Immich (photos), Vaultwarden (passwords), Jellyfin (media),
 openwebui, n8n, Linkwarden, Firefly III, Duplicati, Syncthing, Portainer,
 Watchtower, plus supporting Postgres / MariaDB / Redis. On VLAN 60
-(192.168.60.63), 6 GB RAM, 8 cores. AdGuard DNS reachability is checked on
-TCP 53.
+(docker.lan), 6 GB RAM, 8 cores. AdGuard DNS reachability is checked on
+the DNS port.
 
 ### sentinel (vmid 106, lxc) — high, restart: ask
 HomelabSentinel itself — the agent + Telegram bot. If it dies, there is no
@@ -53,7 +53,7 @@ Pentest / sandbox VM. No backup urgency.
 
 ## Proxmox host
 
-- Node `Proxmox`, SSH `root@192.168.178.18:22` (key-based), used for
+- Node `Proxmox`, SSH `root@pve.lan` (key-based), used for
   `smartctl` SMART scans.
 - Disks monitored: `/dev/sda`, `/dev/nvme0n1`.
 - Backup storage: `general-storage` (as it appears under Datacenter →
@@ -65,7 +65,7 @@ Pentest / sandbox VM. No backup urgency.
 
 No whole-house meter — the energy assistant sums watched Tuya smart plugs as
 the total. Flat tariff: 30.40 ¢/kWh (EUR). Watched plugs: Refrigerator,
-Dishwasher, Washing machine, Naveen laptop, Chaitra laptop, TV stand, Decor
+Dishwasher, Washing machine, Laptop A, Laptop B, TV stand, Decor
 lights, Backlight. Caveat: the `*_total_energy` sensors reset ~once/day, so a
 24h window that straddles a reset under-reports; switch to HA Utility Meter
 helpers for billing-grade accuracy.

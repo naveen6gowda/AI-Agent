@@ -108,7 +108,7 @@ tools = [check_proxmox_status, get_ha_entity, restart_lxc, send_telegram_alert]
 # -------------------------------------------------------------------
 # 3.  System prompt
 # -------------------------------------------------------------------
-SYSTEM = """You are HomelabSentinel, an SRE agent for Naveen's homelab.
+SYSTEM = """You are HomelabSentinel, an SRE agent for the homelab.
 Your job: investigate the user's question, use tools to gather data, decide if action is needed and also take approval from user via telegram alert before taking any action.
 Rules:
 - Always check status before restarting anything.
@@ -182,11 +182,11 @@ if __name__ == "__main__":
     # - run_name: human-readable label for this run in the trace list
     config = {
         "run_name": "homelab-sentinel-check",
-        "tags": ["env:dev", "agent:v4", "user:naveen"],
+        "tags": ["env:dev", "agent:v4", "user:operator"],
         "metadata": {
             "session_id": session_id,
             "version": "v4-langsmith",
-            "operator": "naveen",
+            "operator": "operator",
         },
     }
 

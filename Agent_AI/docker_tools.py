@@ -7,7 +7,7 @@ already running on the host. No SSH, no root login — a Portainer access
 token, scoped and revocable, does it all.
 
 Config in .env:
-    PORTAINER_URL=https://192.168.60.63:9443   # or http://192.168.60.63:9000
+    PORTAINER_URL=https://docker.lan   # or http://docker.lan
     PORTAINER_API_KEY=ptr_xxxxx                # Portainer ▸ My account ▸ Access tokens
     PORTAINER_ENDPOINT_ID=                      # blank = auto-detect first Docker env
     PORTAINER_VERIFY_TLS=false                  # 9443 ships a self-signed cert

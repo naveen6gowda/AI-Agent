@@ -132,8 +132,8 @@ def check_presence_state() -> Dict[str, Any]:
     Returns:
         {
           "presence": "home" | "away" | "mixed" | "unknown",
-          "home": ["Naveen", ...],
-          "away": [{"name": "Chaitra", "state": "Work"}, ...],
+          "home": ["Alice", ...],
+          "away": [{"name": "Bob", "state": "Work"}, ...],
           "details": [...]   # raw entity data for the agent to inspect
         }
     """

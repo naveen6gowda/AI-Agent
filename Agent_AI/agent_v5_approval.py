@@ -423,7 +423,7 @@ _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 DESTRUCTIVE_TOOLS = {"restart_lxc", "restart_docker_container", "call_ha_service"}
 
 
-SYSTEM = """You are HomelabSentinel, an SRE agent for Naveen's homelab.
+SYSTEM = """You are HomelabSentinel, an SRE agent for the homelab.
 
 Investigate the user's question with read tools first, then call a
 destructive tool only when justified. The runtime will pause and ask

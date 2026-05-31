@@ -76,7 +76,7 @@ _TOKEN_RE = re.compile(r"[a-z0-9_.]+")
 
 def _tokenize(text: str) -> List[str]:
     """Lowercase word/number tokens, keeping internal dots so IPs and
-    dotted entity ids ('192.168.178.9', 'sensor.refrigerator_total_energy')
+    dotted entity ids ('router.lan', 'sensor.refrigerator_total_energy')
     survive as single tokens. Trailing/leading dots are stripped."""
     out = []
     for raw in _TOKEN_RE.findall(text.lower()):
@@ -312,7 +312,7 @@ def answer(query: str, k: int = DEFAULT_K) -> Dict[str, Any]:
         for i, c in enumerate(chunks)
     )
     prompt = (
-        "You are answering a question about Naveen's homelab using ONLY the "
+        "You are answering a question about the homelab using ONLY the "
         "context below. If the answer is not in the context, say you don't "
         "know — do not invent details. Be concise (a few sentences). Cite the "
         "sources you used by their [n] tag.\n\n"
