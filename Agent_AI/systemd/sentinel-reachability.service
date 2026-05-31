@@ -1,0 +1,11 @@
+[Unit]
+Description=HomelabSentinel reachability sweep
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/opt/sentinel/.env
+ExecStart=/root/.local/bin/uv run python reachability.py --alert --no-summary
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,10 @@
+[Unit]
+Description=HomelabSentinel backup verification - daily 09:00
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=HomelabSentinel — Telegram conversational bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/sentinel
+ExecStart=/root/.local/bin/uv run python sentinel_bot.py
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

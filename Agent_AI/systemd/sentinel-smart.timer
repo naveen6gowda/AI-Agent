@@ -1,0 +1,10 @@
+[Unit]
+Description=HomelabSentinel SMART scan - nightly 02:30
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

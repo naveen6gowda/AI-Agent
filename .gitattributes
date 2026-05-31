@@ -1,0 +1,8 @@
+# Normalize all text files to LF in the repository (deployed on Linux/systemd).
+* text=auto eol=lf
+
+# Binary assets — never normalize.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.sqlite binary

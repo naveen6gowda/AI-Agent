@@ -1,0 +1,11 @@
+[Unit]
+Description=HomelabSentinel daily energy digest
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/opt/sentinel/.env
+ExecStart=/root/.local/bin/uv run python energy_assistant.py --hours 24 --digest --no-summary
+StandardOutput=journal
+StandardError=journal

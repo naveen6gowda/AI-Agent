@@ -1,0 +1,12 @@
+[Unit]
+Description=HomelabSentinel Docker container check (Portainer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/opt/sentinel/.env
+ExecStart=/root/.local/bin/uv run python docker_tools.py --alert --no-summary
+StandardOutput=journal
+StandardError=journal
