@@ -60,6 +60,7 @@ from presence_assistant import (
 )
 from reachability import sweep_services as _sweep_services
 from smart_monitor import scan_disks as _scan_disks
+from speedtest_monitor import run_speedtest as _run_speedtest
 from rag import search as _rag_search
 from voice import speak_on_alexa as _speak_on_alexa
 from docker_tools import (
@@ -208,6 +209,30 @@ def check_disk_health() -> dict:
               critical_disks: [...], results: [...]}.
     """
     return _scan_disks()
+
+
+@tool
+def check_internet_speed() -> dict:
+    """Measure the homelab's live internet speed — download, upload, latency.
+
+    Runs a quick bandwidth test from the host against Cloudflare's public
+    speed endpoints (pure HTTP, no external CLI). Read-only apart from the
+    bandwidth the test itself consumes.
+
+    Use when:
+      - the user asks "how fast is my internet?" / "is the WAN slow?"
+      - investigating slow services, buffering, or laggy remote access
+      - producing a scheduled connectivity report
+
+    status is 'healthy', 'warning', 'critical', or 'unknown' (the test
+    couldn't reach the endpoint — treat as WAN-down). Alerts fire when
+    down/up throughput drops below, or latency rises above, the configured
+    thresholds (SPEEDTEST_* env vars).
+
+    Returns: {status, download_mbps, upload_mbps, latency_ms, jitter_ms,
+              server, isp, alerts: [...], elapsed_s}.
+    """
+    return _run_speedtest()
 
 
 @tool
@@ -408,7 +433,7 @@ _TOOLS = [
     get_service_catalog, get_service,
     list_proxmox_nodes, list_proxmox_guests,
     check_proxmox_status, get_guest_mem_pct,
-    check_reachability, check_disk_health, check_backups,
+    check_reachability, check_disk_health, check_internet_speed, check_backups,
     discover_energy_entities, check_energy,
     discover_home_entities, check_presence_state,
     check_climate_state, check_light_state,
@@ -452,7 +477,10 @@ Discovery rules (in order of preference):
    homelab itself (runbooks, conventions, network layout, retention), call
    search_docs — it retrieves from the operator's own notes in docs/. Cite
    the source file in your answer. It costs no Claude tokens to call.
-6. NEVER ask the user for a value you can discover with a tool.
+6. For "is my internet slow / how fast is my connection / is the WAN down?"
+   questions, call check_internet_speed — one read-only tool returns download,
+   upload, latency, and a healthy/warning/critical/unknown verdict.
+7. NEVER ask the user for a value you can discover with a tool.
 
 Memory-pressure rules (READ CAREFULLY):
 - Look at mem_pct_source on every check_proxmox_status result:

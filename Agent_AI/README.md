@@ -31,11 +31,12 @@ uv run python sentinel_bot.py
 
 # 3c. run a monitor by hand
 uv run python reachability.py --json | jq .
+uv run python speedtest_monitor.py          # WAN download / upload / latency
 uv run python rag.py "how do I restart the bot?"   # zero Claude tokens
 ```
 
 `systemd/` contains the unit + timer files used for the live 24/7 deployment
-(one long-running bot service + five scheduled monitors).
+(one long-running bot service + six scheduled monitors).
 
 ---
 
@@ -55,6 +56,7 @@ uv run python rag.py "how do I restart the bot?"   # zero Claude tokens
 | | `tools.py` | The integration layer — Proxmox / HA / Telegram + the approval primitive |
 | **Monitors** | `reachability.py` | Parallel TCP/HTTP endpoint sweep |
 | | `smart_monitor.py` | SMART disk health over SSH (`smartctl`) |
+| | `speedtest_monitor.py` | Internet speed — download / upload / latency via Cloudflare (pure httpx) |
 | | `backup_verifier.py` | Backup freshness vs `max_backup_age_h` |
 | | `docker_tools.py` | Container health + gated restart via Portainer REST |
 | | `presence_assistant.py` | Read-only Home Assistant presence/light/climate |

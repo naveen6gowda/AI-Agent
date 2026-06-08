@@ -82,7 +82,7 @@ flowchart TD
     end
 
     subgraph TL["🧰 Tool layer · one file per subsystem"]
-        TLS["tools.py · reachability · smart_monitor<br/>backup_verifier · docker_tools<br/>presence · energy · rag"]
+        TLS["tools.py · reachability · smart_monitor · speedtest<br/>backup_verifier · docker_tools<br/>presence · energy · rag"]
     end
 
     subgraph HL["🏠 Your homelab"]
@@ -124,7 +124,7 @@ The whole design turns on one split:
 | | ☁️ **Claude** (cloud) | 🏠 **Gemma** (local llama.cpp) |
 |---|---|---|
 | **Job** | Multi-step reasoning + tool calls | One-shot "turn this JSON into a sentence" |
-| **Used by** | The interactive agent / bot | All 5 monitors, RAG, common voice |
+| **Used by** | The interactive agent / bot | All 6 monitors, RAG, common voice |
 | **Cost** | ~$0.005 / chat (cached) | **$0**, runs offline |
 
 This is why the monitors keep alerting even when the Anthropic balance hits zero.
@@ -186,13 +186,14 @@ instead") instead of blindly retrying.
 
 ## 📡 Scheduled monitors
 
-Five `systemd` timers run headless, summarize on local Gemma, and ping Telegram
+Six `systemd` timers run headless, summarize on local Gemma, and ping Telegram
 **only when something is wrong**:
 
 | Monitor | Cadence | Checks |
 |---|---|---|
 | `reachability` | every 5 min | TCP/HTTP probe of every catalogued endpoint |
 | `docker` | every 10 min | Container health via Portainer |
+| `speedtest` | hourly | WAN download / upload / latency vs thresholds (Cloudflare) |
 | `smart` | nightly 02:30 | SMART disk health over SSH (`smartctl`) |
 | `backups` | daily 09:00 | Backup freshness vs each service's `max_backup_age_h` |
 | `energy` | daily 21:00 | Reset-aware energy digest + tariff cost |
@@ -237,11 +238,12 @@ AI-Agent/
     ├── models.py             ← two-brain factory (Claude + Gemma)
     ├── catalog.py            ← pydantic-validated inventory loader
     ├── tools.py              ← Proxmox / HA / Telegram integration + gate
-    ├── reachability.py · smart_monitor.py · backup_verifier.py
-    ├── docker_tools.py · presence_assistant.py · energy_assistant.py
+    ├── reachability.py · smart_monitor.py · speedtest_monitor.py
+    ├── backup_verifier.py · docker_tools.py
+    ├── presence_assistant.py · energy_assistant.py
     ├── rag.py                ← BM25 local RAG over docs/
     ├── docs/                 ← runbook · services · voice setup (RAG corpus)
-    ├── systemd/              ← 1 bot service + 5 monitor timers
+    ├── systemd/              ← 1 bot service + 6 monitor timers
     ├── .env.example          ← config template (copy → .env)
     └── catalog.example.yaml  ← inventory template (copy → catalog.yaml)
 ```
