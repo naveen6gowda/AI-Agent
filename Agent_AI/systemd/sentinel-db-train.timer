@@ -1,0 +1,9 @@
+[Unit]
+Description=HomelabSentinel commute monitor — every 5 min, Mon-Fri 06:00-08:55
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06..08:00/5:00
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

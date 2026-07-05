@@ -6,7 +6,7 @@ command to Sentinel and have the Echo speak the answer. Runs on this LXC
 (LXC 106, sentinel.lan) alongside the bot; HA reaches it over the LAN.
 
     "Alexa, <phrase>" → Alexa Routine → HA automation
-        → POST http://sentinel.lan/voice
+        → POST http://sentinel.lan:8099/voice
            {"intent": "status", "text": "", "speak": true}
         → this server runs the intent (Gemma for the canned checks; Claude,
           read-only, for free-form "ask") and speaks the result on the Echo

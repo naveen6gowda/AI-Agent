@@ -27,8 +27,8 @@ import uuid
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
+from models import agent_llm
 from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, START
 from langgraph.graph.message import add_messages
@@ -108,7 +108,7 @@ tools = [check_proxmox_status, get_ha_entity, restart_lxc, send_telegram_alert]
 # -------------------------------------------------------------------
 # 3.  System prompt
 # -------------------------------------------------------------------
-SYSTEM = """You are HomelabSentinel, an SRE agent for the homelab.
+SYSTEM = """You are HomelabSentinel, an SRE agent for the operator's homelab.
 Your job: investigate the user's question, use tools to gather data, decide if action is needed and also take approval from user via telegram alert before taking any action.
 Rules:
 - Always check status before restarting anything.
@@ -124,7 +124,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-llm = ChatAnthropic(model="claude-sonnet-4-6", max_tokens=2048)
+llm = agent_llm(max_tokens=2048)  # single MLX model (see models.py)
 llm_with_tools = llm.bind_tools(tools)
 
 
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         "metadata": {
             "session_id": session_id,
             "version": "v4-langsmith",
-            "operator": "operator",
+            "operator": "you",
         },
     }
 

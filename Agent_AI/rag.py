@@ -312,7 +312,7 @@ def answer(query: str, k: int = DEFAULT_K) -> Dict[str, Any]:
         for i, c in enumerate(chunks)
     )
     prompt = (
-        "You are answering a question about the homelab using ONLY the "
+        "You are answering a question about the operator's homelab using ONLY the "
         "context below. If the answer is not in the context, say you don't "
         "know — do not invent details. Be concise (a few sentences). Cite the "
         "sources you used by their [n] tag.\n\n"

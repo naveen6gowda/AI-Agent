@@ -1,0 +1,11 @@
+[Unit]
+Description=HomelabSentinel — Telegram alert for failed unit %i
+# Deliberately NO OnFailure= here: a broken alerter must not alert-loop.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/opt/sentinel/.env
+ExecStart=/root/.local/bin/uv run python failure_alert.py %i
+StandardOutput=journal
+StandardError=journal

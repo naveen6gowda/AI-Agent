@@ -1,10 +1,10 @@
 [Unit]
-Description=HomelabSentinel internet speed test - hourly
+Description=HomelabSentinel speed test - every 4 hours
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=1h
-AccuracySec=1min
+OnCalendar=*-*-* 00/4:00:00
+Persistent=true
+AccuracySec=5min
 
 [Install]
 WantedBy=timers.target

@@ -34,7 +34,10 @@ that's the gate's job, not the tool's. Avoids double-prompting.
 
 import os
 import sys
+import time
+from datetime import datetime
 from typing import Annotated, List, TypedDict
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage, ToolMessage, trim_messages
@@ -46,7 +49,7 @@ from langgraph.prebuilt import tools_condition
 from langgraph.types import Command, interrupt
 
 from catalog import load_catalog
-from models import agent_llm
+from models import agent_llm, agent_provider, get_active_model as _get_active_model
 from backup_verifier import verify_backups as _verify_backups
 from energy_assistant import (
     discover_energy_entities as _discover_energy_entities,
@@ -75,6 +78,7 @@ from tools import (
     get_guest_mem_pct as _get_guest_mem_pct,
     get_ha_entity as _get_ha_entity,
     list_ha_entities as _list_ha_entities,
+    list_integration_sensors as _list_integration_sensors,
     restart_lxc_raw as _restart_lxc_raw,
     call_ha_service_raw as _call_ha_service_raw,
     send_telegram_alert as _send_telegram_alert,
@@ -84,6 +88,22 @@ from tools import (
 
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
+
+# --- Langfuse tracing via @observe (optional; safe no-op if unavailable) ---
+import os as _os
+try:
+    from langfuse.decorators import observe as _observe, langfuse_context as _lf_ctx
+    _LF_ON = bool(_os.getenv("LANGFUSE_PUBLIC_KEY") and _os.getenv("LANGFUSE_SECRET_KEY"))
+except Exception:
+    _LF_ON = False
+    _lf_ctx = None
+    def _observe(*_a, **_k):
+        if _a and len(_a) == 1 and callable(_a[0]) and not _k:
+            return _a[0]
+        def _decorate(_fn):
+            return _fn
+        return _decorate
+print("[agent] Langfuse @observe tracing:", "on" if _LF_ON else "off")
 
 
 # -------------------------------------------------------------------
@@ -210,27 +230,17 @@ def check_disk_health() -> dict:
     """
     return _scan_disks()
 
-
 @tool
 def check_internet_speed() -> dict:
-    """Measure the homelab's live internet speed — download, upload, latency.
+    """Run an internet speed test and report download/upload/ping in Mbps.
 
-    Runs a quick bandwidth test from the host against Cloudflare's public
-    speed endpoints (pure HTTP, no external CLI). Read-only apart from the
-    bandwidth the test itself consumes.
-
-    Use when:
-      - the user asks "how fast is my internet?" / "is the WAN slow?"
-      - investigating slow services, buffering, or laggy remote access
-      - producing a scheduled connectivity report
-
-    status is 'healthy', 'warning', 'critical', or 'unknown' (the test
-    couldn't reach the endpoint — treat as WAN-down). Alerts fire when
-    down/up throughput drops below, or latency rises above, the configured
-    thresholds (SPEEDTEST_* env vars).
-
-    Returns: {status, download_mbps, upload_mbps, latency_ms, jitter_ms,
-              server, isp, alerts: [...], elapsed_s}.
+    Use when the operator asks "how fast is my internet?", "is my connection
+    slow?", or to include in a health report. Returns:
+      {status: ok|slow|error, download_mbps, upload_mbps, ping_ms, server,
+       threshold_mbps}
+    status is "slow" when download is below SPEEDTEST_MIN_DOWNLOAD_MBPS
+    (default 20). Read-only, but it takes ~30s and uses real bandwidth — call
+    it only when asked, not as part of a routine "is everything OK?" sweep.
     """
     return _run_speedtest()
 
@@ -346,6 +356,24 @@ def list_ha_entities(domain: str = "", limit: int = 30) -> dict:
 
 
 @tool
+def list_esphome_sensors(device: str = "", environmental_only: bool = True) -> dict:
+    """List ESPHome devices and their sensors with CURRENT readings.
+
+    Use this for "what's the temperature/humidity/CO2 in <room>?" or
+    "show all my sensor nodes". Groups every ESPHome entity under its
+    physical device (e.g. "Office Monitor" -> temperature, humidity, CO2).
+
+    Args:
+        device: optional substring to one device (e.g. "office", "bedroom").
+        environmental_only: default True -> only ambient sensors
+            (temperature, humidity, air quality). Set False ONLY when the
+            user explicitly wants diagnostics too (wifi signal, uptime, ip);
+            the full list is ~5x larger and much slower to summarize.
+    """
+    return _list_integration_sensors("esphome", device or None, environmental_only)
+
+
+@tool
 def restart_lxc(node: str, vmid: int) -> dict:
     """Restart an LXC container. DESTRUCTIVE — gated by operator approval."""
     return _restart_lxc_raw(node, vmid)
@@ -429,17 +457,39 @@ def speak_on_alexa(text: str) -> dict:
     return _speak_on_alexa(text)
 
 
+@tool
+def check_commute(force: bool = True) -> dict:
+    """Check the operator's morning commute (S2 S-Bahn toward Munich and bus
+    700 toward the city, both from YourVillage) for current delays or
+    cancellations. Read-only; makes NO Alexa announcement. force=True checks
+    even outside the weekday 06:00-09:00 commute window."""
+    from db_train_monitor import check_commute as _check_commute
+    return {"alerts": _check_commute(force=force)}
+
+
+@tool
+def next_departures(limit: int = 4) -> dict:
+    """Next departures of the operator's commute services (S2 S-Bahn toward
+    the city and bus 700 toward the city, from YourVillage) with
+    realtime delays. Read-only. The 'summary' field is a spoken-style
+    one-liner; 'departures' has the structured list."""
+    from db_train_monitor import next_departures as _next_departures
+    return _next_departures(limit=limit)
+
+
 _TOOLS = [
     get_service_catalog, get_service,
     list_proxmox_nodes, list_proxmox_guests,
     check_proxmox_status, get_guest_mem_pct,
-    check_reachability, check_disk_health, check_internet_speed, check_backups,
+    check_reachability, check_disk_health, check_backups,
     discover_energy_entities, check_energy,
     discover_home_entities, check_presence_state,
     check_climate_state, check_light_state,
-    get_ha_entity, list_ha_entities,
+    get_ha_entity, list_ha_entities, list_esphome_sensors,
     search_docs, speak_on_alexa,
+    check_commute, next_departures,
     list_docker_containers, check_docker_container,
+    check_internet_speed,
     restart_lxc, restart_docker_container, call_ha_service, send_telegram_alert,
 ]
 _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
@@ -448,7 +498,12 @@ _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 DESTRUCTIVE_TOOLS = {"restart_lxc", "restart_docker_container", "call_ha_service"}
 
 
-SYSTEM = """You are HomelabSentinel, an SRE agent for the homelab.
+SYSTEM = """You are HomelabSentinel, an SRE agent for the operator's homelab.
+
+Every user message starts with a "[now: ...]" stamp — the live local
+time (Europe/Berlin) at the moment the message arrived. That stamp is
+the ONLY source of truth for the current date and time; never answer
+date/time questions from your internal knowledge, which is stale.
 
 Investigate the user's question with read tools first, then call a
 destructive tool only when justified. The runtime will pause and ask
@@ -477,10 +532,7 @@ Discovery rules (in order of preference):
    homelab itself (runbooks, conventions, network layout, retention), call
    search_docs — it retrieves from the operator's own notes in docs/. Cite
    the source file in your answer. It costs no Claude tokens to call.
-6. For "is my internet slow / how fast is my connection / is the WAN down?"
-   questions, call check_internet_speed — one read-only tool returns download,
-   upload, latency, and a healthy/warning/critical/unknown verdict.
-7. NEVER ask the user for a value you can discover with a tool.
+6. NEVER ask the user for a value you can discover with a tool.
 
 Memory-pressure rules (READ CAREFULLY):
 - Look at mem_pct_source on every check_proxmox_status result:
@@ -545,6 +597,91 @@ class AgentState(TypedDict):
 llm = agent_llm()
 llm_with_tools = llm.bind_tools(_TOOLS)
 
+# The operator can switch models live via the Telegram /model command
+# (persisted by models.set_active_model). Rebuild the tool-bound client only
+# when the active model actually changes, so normal turns pay nothing.
+_ACTIVE = {"model": _get_active_model(), "bound": llm_with_tools}
+
+
+def _active_llm_with_tools():
+    current = _get_active_model()
+    if current != _ACTIVE["model"] or _ACTIVE["bound"] is None:
+        _ACTIVE["model"] = current
+        _ACTIVE["bound"] = agent_llm(model=current).bind_tools(_TOOLS)
+        print(f"[agent] active model -> {current}")
+    return _ACTIVE["bound"]
+
+
+# LM Studio JIT-loads the selected model; right after a /model switch it may
+# still hold the previous (large) model in RAM and crash loading the new one
+# ("The model has crashed ... Exit code: null", surfaced as a 400). The crash
+# evicts the old model, so the *next* request reloads cleanly — retry once.
+# This node only asks the LLM for the next message (no tool side effects), so
+# re-invoking is safe.
+_RELOAD_MARKERS = ("model has crashed", "model loading", "failed to load",
+                   "exit code", "no models loaded")
+
+
+def _usage_details(response) -> dict:
+    um = getattr(response, "usage_metadata", None) or {}
+    usage = {}
+    input_tokens = um.get("input_tokens")
+    output_tokens = um.get("output_tokens")
+    total_tokens = um.get("total_tokens")
+    if isinstance(input_tokens, int):
+        usage["input"] = input_tokens
+    if isinstance(output_tokens, int):
+        usage["output"] = output_tokens
+    if isinstance(total_tokens, int):
+        usage["total"] = total_tokens
+    elif "input" in usage or "output" in usage:
+        usage["total"] = usage.get("input", 0) + usage.get("output", 0)
+    return usage
+
+
+def _record_llm_observation(response, model: str) -> None:
+    if not _LF_ON or _lf_ctx is None:
+        return
+    usage_details = _usage_details(response)
+    usage = ({**usage_details, "unit": "TOKENS"} if usage_details else None)
+    try:
+        _lf_ctx.update_current_observation(
+            name="agent-llm",
+            model=model,
+            model_parameters={
+                "provider": agent_provider(),
+                "temperature": "0.0",
+                "max_tokens": 2048,
+            },
+            usage=usage,
+            usage_details=usage_details or None,
+            metadata={
+                "active_model": model,
+                "provider": agent_provider(),
+            },
+            output=getattr(response, "content", None),
+        )
+    except Exception as e:
+        print(f"[agent] Langfuse observation update failed: {type(e).__name__}: {e}")
+
+
+@_observe(name="agent-llm", as_type="generation",
+          capture_input=False, capture_output=False)
+def _invoke_resilient(bound, messages):
+    model = _ACTIVE.get("model") or _get_active_model()
+    try:
+        response = bound.invoke(messages)
+    except Exception as e:
+        if any(m in str(e).lower() for m in _RELOAD_MARKERS):
+            print(f"[agent] LLM transient ({type(e).__name__}); "
+                  f"waiting for model reload, retrying once")
+            time.sleep(6)
+            response = bound.invoke(messages)
+        else:
+            raise
+    _record_llm_observation(response, model)
+    return response
+
 # --- Token economy -------------------------------------------------------
 # The tools + system block is byte-identical on every call, so we mark it
 # with one Anthropic prompt-cache breakpoint: re-reads cost ~10% of normal
@@ -556,9 +693,17 @@ llm_with_tools = llm.bind_tools(_TOOLS)
 # NB: for the *direct* Anthropic API the `cache_control` invoke kwarg is a
 # no-op — langchain only expands it for Bedrock/Vertex — so we place both
 # breakpoints directly on message content blocks ourselves.
-_SYSTEM_MSG = SystemMessage(content=[
-    {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}
-])
+# Anthropic prompt-caching only helps (and is only understood) on the
+# Anthropic API. On a local MLX/OpenAI-compatible server the cache_control
+# blocks are meaningless and the list-of-blocks shape is just overhead, so
+# fall back to a plain-string system message there.
+_CACHE = agent_provider() == "anthropic"
+if _CACHE:
+    _SYSTEM_MSG = SystemMessage(content=[
+        {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}
+    ])
+else:
+    _SYSTEM_MSG = SystemMessage(content=SYSTEM)
 
 # Cap replayed history so a long-lived Telegram chat doesn't grow the
 # per-message token cost without bound. We count messages (not tokens) for a
@@ -586,8 +731,11 @@ def _cache_tail(messages: list) -> list:
     conversation prefix is reusable. Touches only a fresh copy of the last
     message (state is left intact) and only when its content is a plain
     string — always the case here, since the tail is a HumanMessage or a
-    ToolMessage. langchain hoists the breakpoint to the tool_result block."""
-    if not messages:
+    ToolMessage. langchain hoists the breakpoint to the tool_result block.
+
+    No-op on non-Anthropic backends (the local MLX server ignores
+    cache_control and we don't want to reshape its message content)."""
+    if not _CACHE or not messages:
         return messages
     last = messages[-1]
     if not isinstance(last.content, str):
@@ -617,7 +765,7 @@ def _log_usage(response) -> None:
 
 def agent_node(state: AgentState) -> dict:
     history = _cache_tail(_bounded_history(state["messages"]))
-    response = llm_with_tools.invoke([_SYSTEM_MSG] + history)
+    response = _invoke_resilient(_active_llm_with_tools(), [_SYSTEM_MSG] + history)
     _log_usage(response)
     return {"messages": [response]}
 
@@ -720,6 +868,65 @@ graph.add_edge("tools", "agent")
 _BOT_APP: dict = {"checkpointer": None, "app": None}
 
 
+# The model has no clock: nothing in the prompt carried the current time,
+# so it answered time questions from training data. Stamp each user turn
+# with the live local time instead. The stamp rides on the user message —
+# the conversation tail changes every turn anyway — so the byte-identical
+# system+tools cache prefix is untouched. The LXC clock is inherited from
+# the NTP-synced Proxmox host, so no network call (HA or otherwise) needed.
+_AGENT_TZ = ZoneInfo(os.getenv("AGENT_TZ", "Europe/Berlin"))
+
+
+def _stamped(user_msg: str) -> str:
+    now = datetime.now(_AGENT_TZ)
+    return f"[now: {now.strftime('%A %Y-%m-%d %H:%M %Z')}]\n{user_msg}"
+
+def _trace_surface(thread_id: str) -> str:
+    tid = str(thread_id)
+    if tid.startswith("chat-"):
+        return "telegram"
+    if tid.startswith("voice-"):
+        return "voice"
+    return "cli"
+
+
+def _trace_metadata(thread_id: str) -> dict:
+    active_model = _get_active_model()
+    provider = agent_provider()
+    return {
+        "thread_id": str(thread_id),
+        "surface": _trace_surface(thread_id),
+        "provider": provider,
+        "active_model": active_model,
+        "model": active_model,
+    }
+
+
+def _trace_tags(meta: dict) -> list:
+    return [
+        "sentinel",
+        f"surface:{meta['surface']}",
+        f"provider:{meta['provider']}",
+        f"model:{meta['active_model']}",
+    ]
+
+
+def _langfuse_callbacks() -> list:
+    """Return Langfuse callbacks only when the optional integration is present."""
+    if not _LF_ON or _lf_ctx is None:
+        return []
+    try:
+        import langchain.callbacks.base  # noqa: F401
+    except Exception:
+        return []
+    try:
+        handler = _lf_ctx.get_current_langchain_handler()
+    except Exception as e:
+        print(f"[agent] Langfuse callback unavailable: {type(e).__name__}: {e}")
+        return []
+    return [handler] if handler is not None else []
+
+
 def _execute(user_msg, thread_id, approval_fn, checkpointer, verbose, reuse=False):
     """Inner loop. Drives the compiled graph through any number of
     interrupt/resume cycles and returns the final assistant message."""
@@ -730,10 +937,18 @@ def _execute(user_msg, thread_id, approval_fn, checkpointer, verbose, reuse=Fals
         app = _BOT_APP["app"]
     else:
         app = graph.compile(checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": thread_id}}
+    meta = _trace_metadata(thread_id)
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "metadata": meta,
+        "tags": _trace_tags(meta),
+    }
+    callbacks = _langfuse_callbacks()
+    if callbacks:
+        config["callbacks"] = callbacks
 
     state = {
-        "messages": [{"role": "user", "content": user_msg}],
+        "messages": [{"role": "user", "content": _stamped(user_msg)}],
         "denied_ids": [],
     }
     result = app.invoke(state, config=config)
@@ -773,6 +988,7 @@ def _execute(user_msg, thread_id, approval_fn, checkpointer, verbose, reuse=Fals
     return result["messages"][-1].content
 
 
+@_observe(name="sentinel-agent", capture_input=False)
 def run_one(user_msg: str, thread_id: str = "default",
             approval_fn=None, checkpointer=None, verbose: bool = False) -> str:
     """Run the agent for ONE user message. Returns the final answer string.
@@ -786,6 +1002,18 @@ def run_one(user_msg: str, thread_id: str = "default",
     uses the polling-based request_telegram_approval. Same behavior as
     the old run() body.
     """
+    if _LF_ON and _lf_ctx is not None:
+        try:
+            meta = _trace_metadata(thread_id)
+            _lf_ctx.update_current_trace(
+                name="sentinel-agent",
+                session_id=thread_id,
+                input=user_msg,
+                metadata=meta,
+                tags=_trace_tags(meta),
+            )
+        except Exception:
+            pass
     if approval_fn is None:
         approval_fn = request_telegram_approval
 

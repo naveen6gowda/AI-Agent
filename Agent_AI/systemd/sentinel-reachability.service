@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=sentinel-failure-alert@%n.service
 Description=HomelabSentinel reachability sweep
 After=network-online.target
 

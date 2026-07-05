@@ -1,0 +1,26 @@
+# secrets & local env
+.env
+env.bak*
+.claude/settings.local.json
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# runtime state (regenerated; never commit)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+audit.log
+rag_index.json
+transit_state.json
+active_model.txt
+finance_unparsed.jsonl
+
+# generated artifacts
+*.pdf
+
+# manual backups (git replaces these)
+*.bak
+*.bak.*

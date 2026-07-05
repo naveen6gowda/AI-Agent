@@ -2,6 +2,7 @@
 Description=HomelabSentinel Docker container check - every 10 minutes
 
 [Timer]
+Persistent=true
 OnCalendar=*:0/10
 AccuracySec=1min
 

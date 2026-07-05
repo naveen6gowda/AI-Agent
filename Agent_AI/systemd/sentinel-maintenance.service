@@ -1,0 +1,10 @@
+[Unit]
+OnFailure=sentinel-failure-alert@%n.service
+Description=HomelabSentinel checkpoint DB retention (prune + vacuum)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+ExecStart=/root/.local/bin/uv run python checkpoint_maintenance.py --stop-bot
+StandardOutput=journal
+StandardError=journal

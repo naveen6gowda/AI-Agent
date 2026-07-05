@@ -523,6 +523,132 @@ def list_ha_entities(domain: Optional[str] = None, limit: int = 50) -> dict:
 
 
 # -------------------------------------------------------------------
+# Device-registry discovery (ESPHome etc.) via HA's template API
+# -------------------------------------------------------------------
+# The /api/states dump has no notion of *devices* or which integration
+# owns an entity — that lives in HA's device/entity registry, normally
+# only reachable over the WebSocket API. But HA's Jinja engine exposes it
+# through helpers we can POST to /api/template over plain REST:
+# integration_entities(), device_id(), device_attr(). That lets us group
+# every ESPHome sensor under the physical node it lives on (e.g. "Office
+# Monitor" -> temperature/humidity/CO2) with zero extra dependencies.
+
+# device_class values that are ambient/environmental readings — the
+# stuff you actually want off a sensor node, vs diagnostics like
+# wifi_signal / uptime / ip_address / battery.
+_ENV_DEVICE_CLASSES = {
+    "temperature", "humidity", "pressure", "atmospheric_pressure",
+    "carbon_dioxide", "carbon_monoxide", "volatile_organic_compounds",
+    "volatile_organic_compounds_parts", "aqi", "pm25", "pm10", "pm1",
+    "illuminance", "moisture", "nitrogen_dioxide", "ozone",
+}
+
+
+def _ha_template(template: str) -> Any:
+    """Render a Jinja template against HA and return the parsed result.
+
+    /api/template returns text/plain, so templates here render with
+    `| tojson` and we json.loads the body. {"error": ...} on any failure.
+    """
+    if not (_HA_URL and _HA_TOKEN):
+        return {"error": "HA env vars not set (HA_URL, HA_TOKEN)."}
+    try:
+        r = httpx.post(
+            f"{_HA_URL}/api/template",
+            headers=_ha_headers(),
+            json={"template": template},
+            timeout=20.0,
+        )
+        if r.status_code == 401:
+            return {"error": "HA auth failed — token invalid or revoked."}
+        r.raise_for_status()
+        return json.loads(r.text)
+    except httpx.ConnectError as e:
+        return {"error": f"cannot reach HA at {_HA_URL} — {e}"}
+    except (httpx.HTTPError, ValueError) as e:
+        return {"error": f"HA template error: {e}"}
+
+
+def _round_state(state: Any) -> Any:
+    """Round noisy float states (29.2701034... -> 29.27); leave non-numeric
+    states ('unavailable', 'on', timestamps) untouched."""
+    try:
+        return round(float(state), 2)
+    except (TypeError, ValueError):
+        return state
+
+
+def list_integration_sensors(
+    integration: str = "esphome",
+    device: Optional[str] = None,
+    environmental_only: bool = False,
+) -> dict:
+    """List every entity an integration provides, grouped by physical device.
+
+    Built for ESPHome sensor nodes: returns each device (e.g. "Office
+    Monitor") with its entities and CURRENT readings — temperature,
+    humidity, CO2, pressure, illuminance, moisture, etc.
+
+    Args:
+        integration: HA integration/platform name. Default "esphome";
+            also works for "mqtt", "zha", "shelly", ...
+        device: optional case-insensitive substring to one device
+            (e.g. "office" matches "Office Monitor").
+        environmental_only: if True, keep only ambient sensors
+            (temperature/humidity/air-quality) and drop diagnostics like
+            wifi_signal/uptime/ip_address.
+    """
+    safe = "".join(c for c in integration if c.isalnum() or c == "_")
+    template = (
+        "{%- set ns = namespace(rows=[]) -%}"
+        "{%- for e in integration_entities('" + safe + "') -%}"
+        "{%- set did = device_id(e) -%}"
+        "{%- set row = {"
+        "'entity_id': e,"
+        "'device': (device_attr(did,'name_by_user') or device_attr(did,'name')) if did else None,"
+        "'name': state_attr(e,'friendly_name'),"
+        "'state': states(e),"
+        "'device_class': state_attr(e,'device_class'),"
+        "'unit': state_attr(e,'unit_of_measurement')} -%}"
+        "{%- set ns.rows = ns.rows + [row] -%}"
+        "{%- endfor -%}"
+        "{{ ns.rows | tojson }}"
+    )
+    rows = _ha_template(template)
+    if isinstance(rows, dict) and "error" in rows:
+        return rows
+    if not isinstance(rows, list):
+        return {"error": "unexpected template result", "raw": rows}
+
+    if environmental_only:
+        rows = [r for r in rows if r.get("device_class") in _ENV_DEVICE_CLASSES]
+    if device:
+        dl = device.lower()
+        rows = [r for r in rows if dl in (r.get("device") or "").lower()]
+
+    grouped: Dict[str, List[dict]] = {}
+    for r in rows:
+        dev = r.get("device") or "(no device)"
+        grouped.setdefault(dev, []).append({
+            "entity_id": r["entity_id"],
+            "name": r.get("name"),
+            "state": _round_state(r.get("state")),
+            "unit": r.get("unit"),
+            "device_class": r.get("device_class"),
+        })
+
+    devices = [{"device": d, "sensor_count": len(s), "sensors": s}
+               for d, s in sorted(grouped.items())]
+    return {
+        "integration": integration,
+        "environmental_only": environmental_only,
+        "device_count": len(devices),
+        "sensor_count": sum(len(d["sensors"]) for d in devices),
+        "devices": devices,
+    }
+
+
+# -------------------------------------------------------------------
 # Telegram client
 # -------------------------------------------------------------------
 _TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

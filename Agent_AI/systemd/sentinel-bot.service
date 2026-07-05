@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=sentinel-failure-alert@%n.service
 Description=HomelabSentinel — Telegram conversational bot
 After=network-online.target
 Wants=network-online.target

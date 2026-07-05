@@ -14,9 +14,10 @@ Install:
 """
 
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
 from langchain.agents import create_agent
+
+from models import agent_llm
 
 from tools import (
     check_proxmox_status as _check_proxmox_status,
@@ -69,7 +70,7 @@ tools = [check_proxmox_status, get_ha_entity, restart_lxc, send_telegram_alert]
 # -------------------------------------------------------------------
 # 2.  System prompt (identical to v1)
 # -------------------------------------------------------------------
-SYSTEM = """You are HomelabSentinel, an SRE agent for the homelab.
+SYSTEM = """You are HomelabSentinel, an SRE agent for the operator's homelab.
 Your job: investigate the user's question, use tools to gather data, decide if action is needed and also take approval from user via telegram alert before taking any action.
 Rules:
 - Always check status before restarting anything.
@@ -84,7 +85,7 @@ Rules:
 # create_agent returns a CompiledStateGraph (LangGraph) that internally
 # runs: model_node -> tool_node -> model_node -> ... until the model
 # stops requesting tools. Same ReAct loop as v1, just precompiled.
-llm = ChatAnthropic(model="claude-sonnet-4-6", max_tokens=2048)
+llm = agent_llm(max_tokens=2048)  # single MLX model (see models.py)
 
 agent = create_agent(
     model=llm,

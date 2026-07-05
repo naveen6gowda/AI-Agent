@@ -2,6 +2,7 @@
 Description=HomelabSentinel reachability sweep - every 5 minutes
 
 [Timer]
+Persistent=true
 OnBootSec=2min
 OnUnitActiveSec=5min
 AccuracySec=30s

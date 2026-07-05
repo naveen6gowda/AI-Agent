@@ -20,10 +20,10 @@ CANDIDATES = [
     "sensor.dishwasher_total_energy_cloud",
     "sensor.washing_machine_total_energy",
     "sensor.washing_machine_electricity",
-    "sensor.laptop_a_total_energy",
-    "sensor.laptop_a_electricity",
-    "sensor.laptop_b_total_energy",
-    "sensor.laptop_b_electricity",
+    "sensor.laptop_total_energy",
+    "sensor.laptop_electricity",
+    "sensor.chaitra_laptop_total_energy",
+    "sensor.chaitra_laptop_electricity",
     "sensor.smart_plug_10_total_energy",   # Backlight
     "sensor.backlight_electricity",
     "sensor.smart_plug_12_total_energy",   # Decor lights

@@ -1,12 +1,12 @@
 [Unit]
 OnFailure=sentinel-failure-alert@%n.service
-Description=HomelabSentinel backup verification
+Description=HomelabSentinel commute monitor — S2 + bus 700 from YourVillage
 After=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/sentinel
 EnvironmentFile=/opt/sentinel/.env
-ExecStart=/root/.local/bin/uv run python backup_verifier.py --alert --no-summary
+ExecStart=/root/.local/bin/uv run python db_train_monitor.py --alert
 StandardOutput=journal
 StandardError=journal

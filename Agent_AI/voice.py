@@ -42,7 +42,7 @@ from tools import _ha_request, _audit  # reuse HA REST helper + audit log
 # Config
 # ---------------------------------------------------------------------
 # notify.<this> is the Alexa Media Player TTS service for the target Echo.
-ALEXA_TARGET = os.getenv("VOICE_ALEXA_TARGET", "alexa_media_echo_dot")
+ALEXA_TARGET = os.getenv("VOICE_ALEXA_TARGET", "alexa_media_your_echo_dot")
 # "tts" speaks immediately; "announce" prepends the Alexa chime.
 ALEXA_TYPE = os.getenv("VOICE_ALEXA_TYPE", "tts")
 # Keep spoken answers short — an Echo reading a 2000-char essay is painful.
@@ -113,6 +113,10 @@ def _intent_disks(text: str = "") -> str:
     from smart_monitor import scan_disks, summarize_scan
     return summarize_scan(scan_disks())
 
+def _intent_speed(text: str = "") -> str:
+    from speedtest_monitor import run_speedtest, summarize_speedtest
+    return summarize_speedtest(run_speedtest())
+
 
 def _intent_presence(text: str = "") -> str:
     from presence_assistant import check_presence_state
@@ -133,6 +137,14 @@ def _intent_presence(text: str = "") -> str:
 def _intent_docker(text: str = "") -> str:
     from docker_tools import scan_containers, summarize_containers
     return summarize_containers(scan_containers())
+
+
+def _intent_train(text: str = "") -> str:
+    from db_train_monitor import next_departures
+    try:
+        return next_departures().get("summary") or "I couldn't reach the departure service."
+    except Exception as e:
+        return f"I couldn't check the trains: {type(e).__name__}."
 
 
 def _voice_deny(action: str, details: str, timeout_s: Optional[int] = None) -> Dict[str, Any]:
@@ -170,8 +182,10 @@ INTENTS: Dict[str, Callable[[str], str]] = {
     "backups": _intent_backups, "backup": _intent_backups,
     "energy": _intent_energy, "power": _intent_energy,
     "disks": _intent_disks, "disk": _intent_disks, "smart": _intent_disks,
+    "speed": _intent_speed, "internet": _intent_speed, "network": _intent_speed,
     "presence": _intent_presence, "home": _intent_presence, "who": _intent_presence,
     "docker": _intent_docker, "containers": _intent_docker, "container": _intent_docker,
+    "train": _intent_train, "commute": _intent_train, "bus": _intent_train, "sbahn": _intent_train,
     "ask": _intent_ask,
 }
 
