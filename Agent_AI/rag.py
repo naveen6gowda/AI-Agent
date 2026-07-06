@@ -20,16 +20,16 @@ in embeddings without touching callers.
 
 Two entry points:
   - search(query, k)  → top-k chunks with source + heading + score. Wired
-                        into the agent as the search_docs tool: Claude reads
+                        into the agent as the search_docs tool: the model reads
                         the chunks and synthesizes the answer (best quality,
                         composes with the other tools).
-  - answer(query)     → retrieval + LOCAL Gemma generation. Fully offline,
-                        spends ZERO Claude tokens. Used by the CLI and any
+  - answer(query)     → retrieval + the LOCAL LLM generation. Fully offline,
+                        spends ZERO cloud tokens. Used by the CLI and any
                         future "ask the docs" path that must not cost money.
 
 CLI:
     uv run python rag.py --ingest                  # (re)build the index
-    uv run python rag.py "how do I restart the bot?"   # retrieve + Gemma answer
+    uv run python rag.py "how do I restart the bot?"   # retrieve + the local LLM answer
     uv run python rag.py --search "backup storage"     # retrieval only, no LLM
     uv run python rag.py --json "..."                  # raw structured output
 
@@ -294,10 +294,10 @@ def search(query: str, k: int = DEFAULT_K) -> Dict[str, Any]:
 
 
 def answer(query: str, k: int = DEFAULT_K) -> Dict[str, Any]:
-    """Retrieve + generate an answer with LOCAL Gemma (zero Claude tokens).
+    """Retrieve + generate an answer with the LOCAL LLM (zero cloud tokens).
 
     Falls back to returning the top chunk verbatim if the llama-server is
-    unreachable, so the docs are still useful when Gemma is down."""
+    unreachable, so the docs are still useful when the local LLM is down."""
     res = search(query, k=k)
     chunks = res.get("chunks", [])
     sources = [{"source": c["source"], "heading": c["heading"]} for c in chunks]

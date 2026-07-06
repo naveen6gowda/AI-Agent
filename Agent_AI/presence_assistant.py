@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from tools import ha_all_states
 
@@ -216,14 +216,14 @@ def check_light_state(include_off: bool = True) -> Dict[str, Any]:
     states = ha_all_states()
     lights = [s for s in states if s.get("entity_id", "").startswith("light.")]
     rows = []
-    for l in lights:
-        st = l.get("state")
+    for light in lights:
+        st = light.get("state")
         if not include_off and st != "on":
             continue
-        bright = _attr(l, "brightness")
+        bright = _attr(light, "brightness")
         rows.append({
-            "entity_id": l["entity_id"],
-            "friendly_name": _attr(l, "friendly_name", ""),
+            "entity_id": light["entity_id"],
+            "friendly_name": _attr(light, "friendly_name", ""),
             "state": st,
             "brightness": bright,
             "brightness_pct": round(bright / 2.55, 0) if bright else None,
@@ -241,7 +241,7 @@ def _print_discover(d: Dict[str, Any]) -> None:
         print(f"ERROR: {d['error']}")
         return
     counts = d["counts"]
-    print(f"\nDiscovered home entities:")
+    print("\nDiscovered home entities:")
     for k, v in counts.items():
         print(f"  {k:<16} {v}")
 
@@ -288,11 +288,11 @@ def _print_state(presence, climates, lights) -> None:
     if lights["count"] == 0:
         print("  (no light entities)")
     else:
-        on_lights = [l for l in lights["lights"] if l["state"] == "on"]
+        on_lights = [li for li in lights["lights"] if li["state"] == "on"]
         print(f"  ON: {lights['on_count']} of {lights['count']}")
-        for l in on_lights[:10]:
-            bp = f" @ {int(l['brightness_pct'])}%" if l['brightness_pct'] else ""
-            print(f"    {l['entity_id']:<40} {l['friendly_name']}{bp}")
+        for li in on_lights[:10]:
+            bp = f" @ {int(li['brightness_pct'])}%" if li['brightness_pct'] else ""
+            print(f"    {li['entity_id']:<40} {li['friendly_name']}{bp}")
 
 
 def main() -> int:

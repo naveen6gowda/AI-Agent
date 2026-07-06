@@ -16,9 +16,9 @@ Whisper would only apply to a Telegram-voice path, which we deliberately did
 not build (the operator wants everything through Alexa).
 
 COST: the common intents (status / backups / energy / disks / presence) run
-the existing monitors and summarize on LOCAL Gemma — ZERO Claude tokens — so
-voice works even when the Anthropic balance is empty. Only the free-form
-"ask" intent uses the Claude agent, and it is forced READ-ONLY: any
+the existing monitors and summarize on the LOCAL LLM — ZERO cloud tokens — so
+voice works even even when internet is down. Only the free-form
+"ask" intent uses the agent, and it is forced READ-ONLY: any
 destructive tool the agent proposes is auto-denied. (Voice must never poll
 Telegram for approval, and hands-free destructive actions are a bad idea.)
 
@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from tools import _ha_request, _audit  # reuse HA REST helper + audit log
+from tools import _audit, _ha_request  # reuse HA REST helper + audit log
 
 # ---------------------------------------------------------------------
 # Config
@@ -90,12 +90,12 @@ def _for_speech(text: str) -> str:
 # Intents — each returns a short answer string (spoken back on the Echo)
 # ---------------------------------------------------------------------
 def _intent_status(text: str = "") -> str:
-    from reachability import sweep_services, summarize_sweep
+    from reachability import summarize_sweep, sweep_services
     return summarize_sweep(sweep_services())
 
 
 def _intent_backups(text: str = "") -> str:
-    from backup_verifier import verify_backups, summarize_verification
+    from backup_verifier import summarize_verification, verify_backups
     return summarize_verification(verify_backups())
 
 
@@ -154,9 +154,9 @@ def _voice_deny(action: str, details: str, timeout_s: Optional[int] = None) -> D
 
 
 def _intent_ask(text: str = "") -> str:
-    """Free-form question → Claude agent, READ-ONLY. Reachable today via
+    """Free-form question → agent, READ-ONLY. Reachable today via
     curl or a future Alexa custom skill (Alexa Routines can't capture free
-    text). Costs Claude tokens, so it degrades gracefully when out of
+    text). Costs cloud tokens, so it degrades gracefully when out of
     credits."""
     text = (text or "").strip()
     if not text:
@@ -171,7 +171,7 @@ def _intent_ask(text: str = "") -> str:
                        approval_fn=_voice_deny)
     except Exception as e:
         if "credit balance" in str(e).lower():
-            return ("The Claude account is out of credits, so I can only run the "
+            return ("The language model is unreachable, so I can only run the "
                     "built-in checks right now — try asking for status, backups, "
                     "energy, disks, or who's home.")
         return f"Sorry, I hit an error: {type(e).__name__}."

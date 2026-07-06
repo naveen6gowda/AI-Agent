@@ -4,7 +4,7 @@ speedtest_monitor.py — Internet speed watcher.
 Runs an Ookla speed test (download / upload / ping) via the pure-Python
 `speedtest-cli` library, classifies download against a threshold, and
 (optionally) sends a Telegram alert when it's too slow. Like the other
-monitors it summarizes on the LOCAL Gemma — ZERO Claude tokens.
+monitors it summarizes on the the LOCAL LLM — ZERO cloud tokens.
 
 NB: a speed test SATURATES the link for ~30s and uses real bandwidth, so
 don't run it on a tight schedule — every few hours is plenty.
@@ -78,8 +78,8 @@ def run_speedtest(min_download_mbps: float | None = None) -> Dict[str, Any]:
 
 
 def summarize_speedtest(data: Dict[str, Any]) -> str:
-    """One-sentence operator digest via local Gemma. Deterministic fallback
-    if Gemma is down — so this NEVER fails the way the other monitors don't."""
+    """One-sentence operator digest via the local LLM. Deterministic fallback
+    if the local LLM is down — so this NEVER fails the way the other monitors don't."""
     if data.get("status") == "error":
         return f"Speed test failed: {data.get('error')}"
 
@@ -113,7 +113,7 @@ def main() -> int:
                         help="send a Telegram alert if download is below threshold")
     parser.add_argument("--min-download", type=float, default=None,
                         help=f"download threshold in Mbps (default {MIN_DOWNLOAD_MBPS})")
-    parser.add_argument("--no-summary", action="store_true", help="skip the Gemma digest")
+    parser.add_argument("--no-summary", action="store_true", help="skip the LLM digest")
     parser.add_argument("--json", action="store_true", help="emit JSON only")
     args = parser.parse_args()
 
@@ -135,7 +135,7 @@ def main() -> int:
           f"status={data['status'].upper()}")
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_speedtest(data))
 
     if args.alert and data["status"] == "slow":

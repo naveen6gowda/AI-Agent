@@ -18,13 +18,13 @@ Public functions (wired into the agent in agent_v5_approval.py):
     get_container(name)                   → one container's status (name match)
     restart_container_raw(name)           → DESTRUCTIVE; gated at the graph level
     scan_containers()                     → digest dict for monitors / voice
-    summarize_containers(data)            → local-Gemma one-paragraph digest
+    summarize_containers(data)            → local-the local LLM one-paragraph digest
 
 Like the other modules, the restart entry point is *_raw: it does NOT ask for
 approval itself — the agent's policy gate owns that, so we don't double-prompt.
 
 CLI:
-    uv run python docker_tools.py                 # table + Gemma digest
+    uv run python docker_tools.py                 # table + LLM digest
     uv run python docker_tools.py --json
     uv run python docker_tools.py --restart immich_server
     uv run python docker_tools.py --alert         # Telegram if anything is down/unhealthy
@@ -35,7 +35,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Union
 
 import httpx
 from dotenv import load_dotenv
@@ -206,15 +206,15 @@ def restart_container_raw(name: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------
-# Digest + Gemma summary (for monitors / the voice 'docker' intent)
+# Digest + the local LLM summary (for monitors / the voice 'docker' intent)
 # ---------------------------------------------------------------------
 def scan_containers() -> Dict[str, Any]:
     return list_containers(all_containers=True)
 
 
 def summarize_containers(data: Dict[str, Any]) -> str:
-    """Local-Gemma 2-3 sentence operator digest. Falls back to a
-    deterministic line if Gemma is unreachable, so it never crashes."""
+    """local-LLM 2-3 sentence operator digest. Falls back to a
+    deterministic line if the local LLM is unreachable, so it never crashes."""
     if data.get("error"):
         return f"Docker check failed: {data['error']}"
 
@@ -272,7 +272,7 @@ def _print_table(data: Dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="HomelabSentinel Docker (Portainer) tools")
     parser.add_argument("--json", action="store_true", help="emit raw JSON")
-    parser.add_argument("--no-summary", action="store_true", help="skip the Gemma digest")
+    parser.add_argument("--no-summary", action="store_true", help="skip the LLM digest")
     parser.add_argument("--restart", metavar="NAME", help="restart one container by name")
     parser.add_argument("--alert", action="store_true",
                         help="send a Telegram alert if any container is stopped/unhealthy")
@@ -299,7 +299,7 @@ def main() -> int:
     _print_table(data)
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_containers(data))
 
     if args.alert and (data["stopped_containers"] or data["unhealthy_containers"]):

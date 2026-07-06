@@ -10,7 +10,7 @@ Two modes:
   default       Use catalog.yaml -> energy to compute totals + cost for a
                 configurable period (default 24h). Reads main meter delta
                 and per-device deltas via /api/history/period. Hands the
-                summary to local Gemma for a 2-3 sentence operator digest.
+                summary to the local LLM for a 2-3 sentence operator digest.
 
 CLI usage:
     uv run python energy_assistant.py --discover
@@ -25,11 +25,10 @@ import argparse
 import datetime as dt
 import json
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from catalog import EnergyConfig, load_catalog
-from tools import ha_all_states, get_ha_history
-
+from tools import get_ha_history, ha_all_states
 
 # ----------------------------------------------------------------------
 # Discovery
@@ -263,7 +262,7 @@ def read_energy_summary(hours: int = 24) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-# Gemma digest
+# LLM digest
 # ----------------------------------------------------------------------
 def summarize_energy(data: Dict[str, Any]) -> str:
     """One-paragraph digest. Deterministic fallback if LLM empty/down."""
@@ -345,7 +344,7 @@ def _print_discover(data: Dict[str, Any]) -> None:
 
     print()
     if data["power"]:
-        print(f"POWER (instantaneous W — informational only):")
+        print("POWER (instantaneous W — informational only):")
         print(f"  {'ENTITY_ID':<45} {'UNIT':<6} {'STATE':<12} FRIENDLY NAME")
         print("  " + "-" * 90)
         for p in data["power"][:20]:  # cap — power sensors are often many
@@ -408,7 +407,7 @@ def main() -> int:
     parser.add_argument("--alert-over", type=float, default=None,
                         help="Telegram alert if main-meter kWh in period exceeds this")
     parser.add_argument("--digest", action="store_true",
-                        help="send Gemma digest to Telegram (daily-digest mode)")
+                        help="send LLM digest to Telegram (daily-digest mode)")
     parser.add_argument("--no-summary", action="store_true",
                         help="skip helper_llm digest")
     parser.add_argument("--json", action="store_true",
@@ -436,7 +435,7 @@ def main() -> int:
         return 1
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_energy(data))
 
     if args.digest:

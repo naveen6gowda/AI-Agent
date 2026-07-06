@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from tools import get_ha_entity, get_ha_history  # noqa: E402

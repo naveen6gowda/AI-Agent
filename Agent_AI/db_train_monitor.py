@@ -58,7 +58,7 @@ def _env_list(name: str, default: str) -> List[str]:
     return [p.strip() for p in os.getenv(name, default).split(",") if p.strip()]
 
 
-# YourVillage station stop — serves both S2 and bus 700.
+# YourVillage (Kr the city) station stop — serves both S2 and bus 700.
 # NearbyVillage (bus only) would be de:00000:0003; LineTerminus is de:00000:0001.
 STOP_ID = os.getenv("TRANSIT_STOP_ID", "de:00000:0002")
 STOP_SPOKEN_NAME = os.getenv("TRANSIT_STOP_NAME", "YourVillage")
@@ -421,7 +421,7 @@ def next_departures(limit: int = 4, stop_id: str = STOP_ID) -> Dict[str, Any]:
     ][:limit]
 
     parts = []
-    for mode, label in (("train", "train"), ("bus", "bus")):
+    for mode, _label in (("train", "train"), ("bus", "bus")):
         nxt = next((i for i in upcoming if i["mode"] == mode), None)
         if not nxt:
             continue

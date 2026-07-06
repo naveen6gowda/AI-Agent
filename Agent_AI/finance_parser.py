@@ -46,13 +46,12 @@ Self-test (no network, no Firefly writes):
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
-
-import os
 
 TZ = ZoneInfo(os.getenv("AGENT_TZ", "Europe/Berlin"))
 

@@ -8,12 +8,12 @@ command to Sentinel and have the Echo speak the answer. Runs on this LXC
     "Alexa, <phrase>" → Alexa Routine → HA automation
         → POST http://sentinel.lan:8099/voice
            {"intent": "status", "text": "", "speak": true}
-        → this server runs the intent (Gemma for the canned checks; Claude,
+        → this server runs the intent (the local LLM for the canned checks; the agent,
           read-only, for free-form "ask") and speaks the result on the Echo
         → also returns the answer text in the HTTP response.
 
-The common intents (status/backups/energy/disks/presence) spend ZERO Claude
-tokens (see voice.py), so this works even with an empty Anthropic balance.
+The common intents (status/backups/energy/disks/presence) spend ZERO cloud
+tokens (see voice.py), so this works even with an unreachable LLM server.
 
 Auth: set VOICE_SERVER_TOKEN in .env and send it as `Authorization: Bearer
 <token>` (or `?token=`). If the env var is empty, auth is DISABLED and a

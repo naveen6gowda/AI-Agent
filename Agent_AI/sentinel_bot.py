@@ -50,14 +50,19 @@ load_dotenv()
 # string) and the underlying graph. We do NOT import the old polling
 # request_telegram_approval — the bot supplies its own.
 from agent_v5_approval import run_one  # noqa: E402
-from tools import _audit  # reuse the audit log helper  # noqa: E402
+from models import (
+    get_active_model as _get_active_model,
+)
 from models import (  # noqa: E402
     list_models as _list_models,
-    get_active_model as _get_active_model,
-    set_active_model as _set_active_model,
+)
+from models import (
     probe_model as _probe_model,
 )
-
+from models import (
+    set_active_model as _set_active_model,
+)
+from tools import _audit  # reuse the audit log helper  # noqa: E402
 
 # ----------------------------------------------------------------------
 # Config
@@ -487,7 +492,7 @@ def _handle_message(checkpointer, msg: dict) -> None:
         print(f"[bot]   → IGNORED (chat_id not in {AUTHORIZED_CHAT_IDS!r})")
         return
     if not text:
-        print(f"[bot]   → IGNORED (empty text)")
+        print("[bot]   → IGNORED (empty text)")
         return
 
     # Strip @botusername that Telegram appends to commands in groups
@@ -496,7 +501,7 @@ def _handle_message(checkpointer, msg: dict) -> None:
 
     # Slash commands
     if cmd == "/start":
-        print(f"[bot]   → /start")
+        print("[bot]   → /start")
         _send_message(chat_id,
                       "HomelabSentinel online. Send /help for examples.")
         return
@@ -505,12 +510,12 @@ def _handle_message(checkpointer, msg: dict) -> None:
         _send_message(chat_id, HELP_TEXT)
         return
     if cmd == "/reset":
-        print(f"[bot]   → /reset")
+        print("[bot]   → /reset")
         _reset_thread(chat_id)
         _send_message(chat_id, "Conversation memory reset.")
         return
     if cmd == "/model":
-        print(f"[bot]   → /model")
+        print("[bot]   → /model")
         _send_model_picker(chat_id)
         return
 

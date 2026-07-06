@@ -43,56 +43,91 @@ from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage, ToolMessage, trim_messages
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import tools_condition
 from langgraph.types import Command, interrupt
 
-from catalog import load_catalog
-from models import agent_llm, agent_provider, get_active_model as _get_active_model
 from backup_verifier import verify_backups as _verify_backups
+from catalog import load_catalog
+from docker_tools import (
+    get_container as _get_container,
+)
+from docker_tools import (
+    list_containers as _list_containers,
+)
+from docker_tools import (
+    restart_container_raw as _restart_container_raw,
+)
 from energy_assistant import (
     discover_energy_entities as _discover_energy_entities,
+)
+from energy_assistant import (
     read_energy_summary as _read_energy_summary,
 )
+from models import agent_llm, agent_provider
+from models import get_active_model as _get_active_model
 from presence_assistant import (
     check_climate_state as _check_climate_state,
+)
+from presence_assistant import (
     check_light_state as _check_light_state,
+)
+from presence_assistant import (
     check_presence_state as _check_presence_state,
+)
+from presence_assistant import (
     discover_home_entities as _discover_home_entities,
 )
+from rag import search as _rag_search
 from reachability import sweep_services as _sweep_services
 from smart_monitor import scan_disks as _scan_disks
 from speedtest_monitor import run_speedtest as _run_speedtest
-from rag import search as _rag_search
-from voice import speak_on_alexa as _speak_on_alexa
-from docker_tools import (
-    list_containers as _list_containers,
-    get_container as _get_container,
-    restart_container_raw as _restart_container_raw,
+from tools import (
+    _audit,
+    request_telegram_approval,
+)
+from tools import (
+    call_ha_service_raw as _call_ha_service_raw,
 )
 from tools import (
     check_proxmox_status as _check_proxmox_status,
-    list_proxmox_nodes as _list_proxmox_nodes,
-    list_proxmox_guests as _list_proxmox_guests,
-    get_guest_mem_pct as _get_guest_mem_pct,
-    get_ha_entity as _get_ha_entity,
-    list_ha_entities as _list_ha_entities,
-    list_integration_sensors as _list_integration_sensors,
-    restart_lxc_raw as _restart_lxc_raw,
-    call_ha_service_raw as _call_ha_service_raw,
-    send_telegram_alert as _send_telegram_alert,
-    request_telegram_approval,
-    _audit,
 )
+from tools import (
+    get_guest_mem_pct as _get_guest_mem_pct,
+)
+from tools import (
+    get_ha_entity as _get_ha_entity,
+)
+from tools import (
+    list_ha_entities as _list_ha_entities,
+)
+from tools import (
+    list_integration_sensors as _list_integration_sensors,
+)
+from tools import (
+    list_proxmox_guests as _list_proxmox_guests,
+)
+from tools import (
+    list_proxmox_nodes as _list_proxmox_nodes,
+)
+from tools import (
+    restart_lxc_raw as _restart_lxc_raw,
+)
+from tools import (
+    send_telegram_alert as _send_telegram_alert,
+)
+from voice import speak_on_alexa as _speak_on_alexa
 
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
 
 # --- Langfuse tracing via @observe (optional; safe no-op if unavailable) ---
 import os as _os
+
 try:
-    from langfuse.decorators import observe as _observe, langfuse_context as _lf_ctx
+    from langfuse.decorators import langfuse_context as _lf_ctx
+    from langfuse.decorators import observe as _observe
     _LF_ON = bool(_os.getenv("LANGFUSE_PUBLIC_KEY") and _os.getenv("LANGFUSE_SECRET_KEY"))
 except Exception:
     _LF_ON = False
@@ -397,7 +432,7 @@ def send_telegram_alert(message: str) -> dict:
 @tool
 def search_docs(query: str, k: int = 4) -> dict:
     """Search the operator's homelab documentation (notes / runbooks / wiki
-    kept in docs/) using local BM25 retrieval — no Claude tokens spent here.
+    kept in docs/) using local BM25 retrieval — no cloud tokens spent here.
 
     Use this for procedural, config, policy, or "how do I …" questions about
     THIS homelab that the live-state tools can't answer — e.g. "how do I
@@ -531,7 +566,7 @@ Discovery rules (in order of preference):
 5. For procedural / config / policy / "how do I …" questions about the
    homelab itself (runbooks, conventions, network layout, retention), call
    search_docs — it retrieves from the operator's own notes in docs/. Cite
-   the source file in your answer. It costs no Claude tokens to call.
+   the source file in your answer. It costs no cloud tokens to call.
 6. NEVER ask the user for a value you can discover with a tool.
 
 Memory-pressure rules (READ CAREFULLY):
@@ -792,10 +827,16 @@ def policy_node(state: AgentState) -> dict:
         ],
     })
 
-    denied_ids = [
-        d["tool_call_id"] for d in (decisions or [])
-        if d.get("decision") != "approved"
-    ]
+    # DEFAULT-DENY: a destructive call runs only if its id was EXPLICITLY
+    # approved. Anything else — empty payload, timeout, unknown/missing
+    # ids, malformed dicts — leaves it denied. (A test-suite catch: the
+    # old code derived denials from the decision list, so a call absent
+    # from a malformed payload would silently run.)
+    approved_ids = {
+        d.get("tool_call_id") for d in (decisions or [])
+        if isinstance(d, dict) and d.get("decision") == "approved"
+    }
+    denied_ids = [tc["id"] for tc in destructive if tc["id"] not in approved_ids]
     return {"denied_ids": denied_ids}
 
 

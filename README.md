@@ -8,6 +8,7 @@
 Proxmox · Home Assistant · Docker state, decides what's wrong, and
 **asks your permission before it changes anything.**
 
+![CI](https://github.com/naveen6gowda/AI-Agent/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1.x-1C3C3C?logo=langchain&logoColor=white)
 ![Local LLM](https://img.shields.io/badge/LLM-100%25_local_·_LM_Studio-FF6B35)

@@ -34,7 +34,6 @@ from typing import List, Literal, Optional
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-
 Criticality = Literal["critical", "high", "medium", "lab"]
 RestartPolicy = Literal["ask", "auto", "never"]
 

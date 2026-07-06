@@ -3,7 +3,7 @@ Phase 2 / Feature #4 — Service reachability sweep.
 
 For every endpoint listed in catalog.yaml, probe it (HTTP/HTTPS GET or
 TCP connect) in parallel, classify results, and (optionally) ask the
-local Gemma LLM to write a one-paragraph operator digest.
+the local LLM LLM to write a one-paragraph operator digest.
 
 CLI usage:
     uv run python reachability.py                    # all services
@@ -155,16 +155,16 @@ def sweep_services(criticality: Optional[str] = None,
 
 
 # ----------------------------------------------------------------------
-# Gemma summarizer — uses helper_llm, never crashes the sweep
+# the local LLM summarizer — uses helper_llm, never crashes the sweep
 # ----------------------------------------------------------------------
 def summarize_sweep(data: Dict[str, Any]) -> str:
-    """Ask the local Gemma helper to write a 2-3 sentence operator digest.
+    """Ask the local LLM helper to write a 2-3 sentence operator digest.
 
     If helper_llm() is unreachable (llama-server down), returns a
     plain-text fallback so the sweep is still useful.
     """
     # Build a compact representation for the prompt. We don't dump the
-    # entire results list — Gemma 4B has limited context and gets confused
+    # entire results list — a small local model has limited context and gets confused
     # by big JSON. Hand it a per-line summary.
     lines = []
     for r in data["results"]:
@@ -262,7 +262,7 @@ def main() -> int:
     _print_table(data)
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_sweep(data))
 
     if args.alert and data.get("critical_down"):

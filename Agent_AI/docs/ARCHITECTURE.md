@@ -72,13 +72,17 @@ Each phase is independently shippable and leaves the system running.
 - `logrotate` for `audit.log`; journald size cap.
 - **Done when:** killing any monitor produces a Telegram alert within a minute.
 
-### Phase 2 — Quality gates (unlocks all refactoring)
+### Phase 2 — Quality gates (unlocks all refactoring) — ✅ shipped 2026-07-05
 - `pytest` + `respx`: unit tests for Proxmox/HA/Portainer clients (mocked
   HTTP) and — critically — **policy-gate tests**: a destructive tool call
   always interrupts; a denied call never executes; a denial produces a
   refusal ToolMessage.
 - `ruff` + `mypy`; GitHub **private** repo; Actions CI (uv, lint, tests).
 - **Done when:** CI is green and the policy invariants are executable.
+- **Outcome:** 23 tests; the default-deny suite caught a real hole (a
+  destructive call missing from a malformed resume payload was treated as
+  approved) — fixed in policy_node. ruff clean; mypy advisory (30-error
+  baseline to burn down); stale two-brain wording removed from live code.
 
 ### Phase 3 — Structure (policy as data, one tool registry)
 - `src/sentinel/` package: `integrations/` (proxmox, ha, portainer, telegram,

@@ -4,7 +4,7 @@ Phase 2 / Feature #1 — SMART disk health watcher.
 For every disk in catalog.proxmox_host.disks_to_monitor, SSH to the
 Proxmox host and run `smartctl -aj <disk>`. Parse the JSON, evaluate
 against thresholds, classify as healthy / warning / critical, and
-(optionally) ask local Gemma to write an operator digest.
+(optionally) ask the local LLM to write an operator digest.
 
 Why SSH and not Proxmox API: smartctl is a host-level tool, and Proxmox
 has no API endpoint for it. We already SSH for guest memory readings,
@@ -23,12 +23,11 @@ import argparse
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from catalog import load_catalog
 from tools import _ssh_exec
-
 
 # ----------------------------------------------------------------------
 # Thresholds — sensible homelab defaults. Override via env later if needed.
@@ -252,7 +251,7 @@ def scan_disks(max_workers: int = 4) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-# Gemma digest
+# LLM digest
 # ----------------------------------------------------------------------
 def _fallback_summary(data: Dict[str, Any], reason: str) -> str:
     """Deterministic summary — used when helper_llm is unreachable OR returns
@@ -272,7 +271,7 @@ def _fallback_summary(data: Dict[str, Any], reason: str) -> str:
 
 
 def summarize_scan(data: Dict[str, Any]) -> str:
-    """One-paragraph digest from the local Gemma. Falls back deterministically."""
+    """One-paragraph digest from the local LLM. Falls back deterministically."""
     lines = []
     for r in data["results"]:
         tag = {"critical": "[CRIT]", "warning": "[WARN]",
@@ -305,7 +304,7 @@ def summarize_scan(data: Dict[str, Any]) -> str:
     )
     try:
         from models import helper_llm
-        # Slight temperature lift — Gemma 4B at temp 0 sometimes generates
+        # Slight temperature lift — a small local model at temp 0 sometimes generates
         # empty completions when a prompt has a clear "everything's fine"
         # answer. 0.2 keeps it deterministic-ish but unsticks it.
         llm = helper_llm(temperature=0.2, max_tokens=220)
@@ -367,7 +366,7 @@ def main() -> int:
     _print_table(data)
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_scan(data))
 
     if args.alert and data.get("critical_disks"):

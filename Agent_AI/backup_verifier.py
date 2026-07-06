@@ -152,7 +152,7 @@ def verify_backups() -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-# Gemma digest (with same fallback pattern as reachability + smart)
+# LLM digest (with same fallback pattern as reachability + smart)
 # ----------------------------------------------------------------------
 def summarize_verification(data: Dict[str, Any]) -> str:
     """One-paragraph digest. Falls back deterministically."""
@@ -245,7 +245,7 @@ def main() -> int:
     _print_table(data)
 
     if not args.no_summary:
-        print("\n--- Gemma digest ---")
+        print("\n--- LLM digest ---")
         print(summarize_verification(data))
 
     if args.alert and data.get("critical_problems"):

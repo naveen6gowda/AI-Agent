@@ -129,7 +129,7 @@ def prune(db: str, keep_days: int, keep_per_thread: int, dry_run: bool) -> None:
     try:
         capped = 0
         if dry_run:
-            for thread_id, ns, n in conn.execute(
+            for _thread_id, _ns, n in conn.execute(
                 "SELECT thread_id, checkpoint_ns, COUNT(*) FROM checkpoints"
                 " GROUP BY thread_id, checkpoint_ns"
             ).fetchall():

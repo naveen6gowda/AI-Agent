@@ -186,7 +186,7 @@ if __name__ == "__main__":
         "metadata": {
             "session_id": session_id,
             "version": "v4-langsmith",
-            "operator": "you",
+            "operator": "operator",
         },
     }
 
