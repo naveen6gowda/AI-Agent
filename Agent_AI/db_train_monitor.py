@@ -70,7 +70,7 @@ BUS_DESTINATIONS = _env_list("TRANSIT_BUS_DESTINATIONS", "City (S)")
 
 MIN_DELAY_ANNOUNCE = int(os.getenv("TRANSIT_MIN_DELAY_ANNOUNCE", "5"))
 REANNOUNCE_DELTA = int(os.getenv("TRANSIT_REANNOUNCE_DELTA", "5"))
-STATE_FILE = os.getenv("TRANSIT_STATE_FILE", "/opt/sentinel/transit_state.json")
+STATE_FILE = os.getenv("TRANSIT_STATE_FILE", "/opt/sentinel/var/transit_state.json")
 STATE_MAX_AGE_HOURS = 6
 
 POLL_INTERVAL_MINUTES = 5

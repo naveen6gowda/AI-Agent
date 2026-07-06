@@ -62,7 +62,7 @@ _HELPER_MIN_TOKENS = int(os.getenv("MLX_HELPER_MIN_TOKENS", "0"))
 # don't want them disagreeing). Empty file / missing -> fall back to MLX_MODEL.
 _ACTIVE_MODEL_FILE = os.getenv("ACTIVE_MODEL_FILE",
                                os.path.join(os.path.dirname(__file__),
-                                            "active_model.txt"))
+                                            "var", "active_model.txt"))
 
 
 def get_active_model() -> str:

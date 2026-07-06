@@ -91,6 +91,19 @@ class Defaults(BaseModel):
     alert_on_status_change: bool = True
 
 
+class Policy(BaseModel):
+    """Approval policy as DATA (Phase 3): which tools the gate interrupts.
+
+    Lives in catalog.yaml next to restart_policy, so safety rules are
+    reviewable, diffable config — not code. The default equals the known
+    destructive set: an older catalog without a policy block behaves
+    exactly as before (never default-allow).
+    """
+    destructive_tools: List[str] = Field(default_factory=lambda: [
+        "restart_lxc", "restart_docker_container", "call_ha_service",
+    ])
+
+
 # ----------------------------------------------------------------------
 # Energy (Feature #6) — optional. If absent, energy_assistant only
 # offers discovery.
@@ -129,6 +142,7 @@ class Catalog(BaseModel):
     defaults: Defaults = Field(default_factory=Defaults)
     services: List[Service]
     proxmox_host: ProxmoxHost
+    policy: Policy = Field(default_factory=Policy)
     energy: Optional[EnergyConfig] = None
 
     # ---------- lookup helpers (these are why we have a class) -------

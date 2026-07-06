@@ -46,8 +46,9 @@ TOKEN = os.getenv("FINANCE_SERVER_TOKEN", "")
 HOST = os.getenv("FINANCE_SERVER_HOST", "0.0.0.0")
 PORT = int(os.getenv("FINANCE_SERVER_PORT", "8098"))
 
-AUDIT_LOG_PATH = Path(__file__).parent / "audit.log"
-UNPARSED_PATH = Path(__file__).parent / "finance_unparsed.jsonl"
+AUDIT_LOG_PATH = Path(__file__).parent / "var" / "audit.log"
+AUDIT_LOG_PATH.parent.mkdir(exist_ok=True)
+UNPARSED_PATH = Path(__file__).parent / "var" / "finance_unparsed.jsonl"
 
 app = FastAPI(title="HomelabSentinel Finance Bridge", version="1.0")
 

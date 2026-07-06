@@ -121,3 +121,38 @@ def test_dry_run_deletes_nothing(tmp_path):
     finally:
         conn.close()
     assert count == 10
+
+
+# ── policy as data (Phase 3) ────────────────────────────────────────
+
+
+def test_policy_block_extends_destructive_set(tmp_path):
+    p = tmp_path / "catalog.yaml"
+    p.write_text(yaml.safe_dump({
+        "proxmox_host": {"node": "pve", "ssh_host": "pve.test"},
+        "services": [{"vmid": 1, "name": "x", "kind": "lxc",
+                      "node": "pve", "criticality": "lab"}],
+        "policy": {"destructive_tools": ["shutdown_host"]},
+    }))
+    catalog_mod.clear_cache()
+    cat = catalog_mod.load_catalog(p)
+    assert cat.policy.destructive_tools == ["shutdown_host"]
+
+
+def test_catalog_without_policy_block_keeps_full_default(tmp_path):
+    p = _write_catalog(tmp_path, [{
+        "vmid": 1, "name": "x", "kind": "lxc",
+        "node": "pve", "criticality": "lab",
+    }])
+    catalog_mod.clear_cache()
+    cat = catalog_mod.load_catalog(p)
+    assert set(cat.policy.destructive_tools) == {
+        "restart_lxc", "restart_docker_container", "call_ha_service"}
+
+
+def test_gate_set_is_union_never_weaker():
+    """catalog policy may ADD gated tools but can never remove the
+    built-in destructive set — config mistakes only make the gate
+    stricter."""
+    import agent_v5_approval as agent
+    assert agent._FALLBACK_DESTRUCTIVE <= agent.DESTRUCTIVE_TOOLS

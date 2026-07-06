@@ -52,7 +52,7 @@ from typing import Any, Dict, List
 # ---------------------------------------------------------------------
 _HERE = Path(__file__).parent
 DOCS_DIR = Path(os.getenv("RAG_DOCS_DIR", str(_HERE / "docs")))
-INDEX_PATH = Path(os.getenv("RAG_INDEX_PATH", str(_HERE / "rag_index.json")))
+INDEX_PATH = Path(os.getenv("RAG_INDEX_PATH", str(_HERE / "var" / "rag_index.json")))
 
 DOC_GLOBS = ("*.md", "*.markdown", "*.txt", "*.rst")
 CHUNK_CHARS = 900               # target chunk size before starting a new chunk

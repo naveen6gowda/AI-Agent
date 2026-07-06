@@ -40,7 +40,8 @@ load_dotenv()
 # -------------------------------------------------------------------
 # Audit log
 # -------------------------------------------------------------------
-AUDIT_LOG_PATH = Path(__file__).parent / "audit.log"
+AUDIT_LOG_PATH = Path(__file__).parent / "var" / "audit.log"
+AUDIT_LOG_PATH.parent.mkdir(exist_ok=True)
 
 
 def _audit(event: str, payload: Dict[str, Any]) -> None:

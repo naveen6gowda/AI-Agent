@@ -24,3 +24,6 @@ finance_unparsed.jsonl
 # manual backups (git replaces these)
 *.bak
 *.bak.*
+
+# runtime state directory
+var/

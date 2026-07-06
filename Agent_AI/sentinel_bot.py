@@ -547,7 +547,7 @@ def main() -> int:
         _send_message(chat, "✅ HomelabSentinel bot online. "
                              "Send /help for examples.")
 
-    with SqliteSaver.from_conn_string("bot_checkpoints.sqlite") as checkpointer:
+    with SqliteSaver.from_conn_string("var/bot_checkpoints.sqlite") as checkpointer:
         while True:
             try:
                 updates = _get_updates(offset)

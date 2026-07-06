@@ -36,7 +36,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-DEFAULT_DBS = ["bot_checkpoints.sqlite", "checkpoints.sqlite"]
+DEFAULT_DBS = ["var/bot_checkpoints.sqlite", "var/checkpoints.sqlite"]
 BOT_UNIT = "sentinel-bot.service"
 
 

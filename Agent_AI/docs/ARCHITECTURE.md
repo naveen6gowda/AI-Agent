@@ -84,7 +84,7 @@ Each phase is independently shippable and leaves the system running.
   approved) — fixed in policy_node. ruff clean; mypy advisory (30-error
   baseline to burn down); stale two-brain wording removed from live code.
 
-### Phase 3 — Structure (policy as data, one tool registry)
+### Phase 3 — Structure (policy as data, one tool registry) — ✅ core shipped 2026-07-06
 - `src/sentinel/` package: `integrations/` (proxmox, ha, portainer, telegram,
   mvg, firefly), `monitors/`, `agent/`, `channels/`, `registry.py`.
 - **Tool registry**: every tool declared once with metadata
@@ -94,6 +94,13 @@ Each phase is independently shippable and leaves the system running.
   rules become reviewable data, like `restart_policy` already is.
 - Runtime state → `var/`; config via `pydantic-settings`.
 - **Done when:** `tools.py` is gone and the agent file contains only graph logic.
+- **Outcome:** approval policy lives in catalog.yaml (union with the
+  built-in set — config can only tighten the gate); all 29 tools are
+  declared once in registry.py (agent file 1080 -> 650 lines, graph
+  logic only); runtime state moved to var/. DEFERRED by choice: the
+  src/sentinel package split — with the registry in place it is
+  cosmetic at this scale, and Phase 4 (MCP) does not depend on it.
+  Revisit if the module count keeps growing.
 
 ### Phase 4 — MCP server (Sentinel becomes a platform)
 - `sentinel-mcp`: FastMCP, **streamable HTTP + bearer token** on the LXC, so
