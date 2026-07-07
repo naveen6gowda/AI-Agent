@@ -1,0 +1,19 @@
+[Unit]
+Description=HomelabSentinel — MCP server (registry over streamable HTTP)
+OnFailure=sentinel-failure-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/opt/sentinel/.env
+ExecStart=/root/.local/bin/uv run python mcp_server.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -47,7 +47,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import tools_condition
 from langgraph.types import Command, interrupt
 
-from catalog import load_catalog
+from catalog import KNOWN_DESTRUCTIVE, destructive_tools
 from models import agent_llm, agent_provider
 from models import get_active_model as _get_active_model
 from registry import _TOOLS, _TOOLS_BY_NAME
@@ -81,18 +81,10 @@ print("[agent] Langfuse @observe tracing:", "on" if _LF_ON else "off")
 # safety policy is data, reviewed like any other config. The fallback is
 # the full known destructive set, so a missing/broken catalog can only
 # make the gate STRICTER, never more permissive.
-_FALLBACK_DESTRUCTIVE = frozenset(
-    {"restart_lxc", "restart_docker_container", "call_ha_service"})
+# (accessor lives in catalog.py so the MCP server shares the exact same gate)
+_FALLBACK_DESTRUCTIVE = KNOWN_DESTRUCTIVE
 
-
-def _destructive_tools() -> frozenset:
-    try:
-        return frozenset(load_catalog().policy.destructive_tools) | _FALLBACK_DESTRUCTIVE
-    except Exception:
-        return _FALLBACK_DESTRUCTIVE
-
-
-DESTRUCTIVE_TOOLS = _destructive_tools()
+DESTRUCTIVE_TOOLS = destructive_tools()
 
 
 SYSTEM = """You are HomelabSentinel, an SRE agent for the operator's homelab.

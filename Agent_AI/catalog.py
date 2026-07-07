@@ -217,3 +217,20 @@ def load_catalog(path: Optional[str | Path] = None) -> Catalog:
 def clear_cache() -> None:
     """Force the next load_catalog() call to re-read from disk."""
     load_catalog.cache_clear()
+
+
+# ----------------------------------------------------------------------
+# Policy accessors (Phase 3/4) — every gate in the system asks HERE.
+# ----------------------------------------------------------------------
+KNOWN_DESTRUCTIVE = frozenset(
+    {"restart_lxc", "restart_docker_container", "call_ha_service"})
+
+
+def destructive_tools() -> frozenset:
+    """The effective destructive-tool set: catalog policy UNION the
+    built-in known set. Config can add gated tools; no config edit or
+    load failure can ever un-gate the known destructive set."""
+    try:
+        return frozenset(load_catalog().policy.destructive_tools) | KNOWN_DESTRUCTIVE
+    except Exception:
+        return KNOWN_DESTRUCTIVE

@@ -27,3 +27,7 @@ finance_unparsed.jsonl
 
 # runtime state directory
 var/
+
+# any .env variant except the template
+.env*
+!.env.example

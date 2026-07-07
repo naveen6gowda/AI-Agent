@@ -32,11 +32,13 @@ Persistence:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
@@ -346,6 +348,36 @@ def _handle_model_pick(cb: dict, idx_str: str) -> None:
     threading.Thread(target=_probe_and_set, daemon=True).start()
 
 
+def _handle_mcp_approval(cb: dict, payload: str) -> None:
+    """Decision tap for a pending MCP-server approval (mcpapp:<rid>:<d>).
+
+    The MCP server cannot poll Telegram — this bot is the single
+    getUpdates consumer — so it parks the request and watches
+    var/approvals/<rid>.json. We own the button tap; we write the file
+    (atomically, so the watcher never reads a half-write). See
+    mcp_server.request_operator_approval.
+    """
+    rid, _, decision = payload.partition(":")
+    if decision not in ("approved", "denied") or not rid.isalnum():
+        _answer_callback(cb["id"], "malformed MCP callback")
+        return
+    user = (cb.get("from", {}).get("username") or
+            cb.get("from", {}).get("first_name", "?"))
+    path = Path(__file__).parent / "var" / "approvals" / f"{rid}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(
+        {"decision": decision, "by": user, "ts": time.time()}))
+    tmp.replace(path)
+    _answer_callback(cb["id"], f"{decision} \u2713")
+    msg = cb.get("message") or {}
+    if msg.get("message_id"):
+        icon = "\u2705" if decision == "approved" else "\u26d4"
+        _edit_message(str(msg["chat"]["id"]), msg["message_id"],
+                      f"{icon} MCP request {rid}: {decision} by {user}")
+    _audit("mcp_approval_tap", {"rid": rid, "decision": decision, "by": user})
+
+
 def _handle_callback(cb: dict) -> None:
     """Main loop calls this when a callback_query update arrives.
 
@@ -361,6 +393,9 @@ def _handle_callback(cb: dict) -> None:
     prefix, token = parts
     if prefix == "m":           # model picker, not an approval
         _handle_model_pick(cb, token)
+        return
+    if prefix == "mcpapp":      # MCP server approval (file IPC)
+        _handle_mcp_approval(cb, token)
         return
     decision = "approved" if prefix == "a" else "denied"
     user = (cb.get("from", {}).get("username") or

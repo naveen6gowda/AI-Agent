@@ -102,7 +102,7 @@ Each phase is independently shippable and leaves the system running.
   cosmetic at this scale, and Phase 4 (MCP) does not depend on it.
   Revisit if the module count keeps growing.
 
-### Phase 4 — MCP server (Sentinel becomes a platform)
+### Phase 4 — MCP server (Sentinel becomes a platform) — ✅ shipped 2026-07-07
 - `sentinel-mcp`: FastMCP, **streamable HTTP + bearer token** on the LXC, so
   Claude Code/Desktop (and other agents) become additional frontends.
 - Tools come from the Phase-3 registry. **Destructive MCP tools still route
@@ -112,6 +112,14 @@ Each phase is independently shippable and leaves the system running.
 - Optional second, public repo: a standalone MVG transit MCP (no secrets).
 - **Done when:** Claude on the Mac can triage the homelab, and a restart
   request from it still lands as an approval card on the phone.
+- **Outcome:** mcp_server.py — low-level MCP Server bridging all 29
+  registry tools (schemas derived from the LangChain tools), stateless
+  streamable HTTP + bearer auth on :8765, systemd-managed with the
+  OnFailure pager. Destructive calls block on a Telegram approval card,
+  default-deny on timeout. Because the bot is Telegram's single
+  getUpdates consumer, the tap travels bot → var/approvals/<id>.json →
+  server (atomic file IPC). 10 gate tests mirror the in-process suite;
+  resources: sentinel://catalog, sentinel://audit-log.
 
 ### Phase 5 — Agentic maturity (the interview differentiators)
 - **Eval harness**: golden set of ~30 prompts with expected tool-call

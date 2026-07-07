@@ -64,6 +64,11 @@ Read them in order and you've learned how to build agents.
 - 🔌 **Three front-ends, one brain** — CLI, Telegram bot, and Alexa voice, wired
   through a dependency-injected approval function. The voice path is
   **read-only by construction** (its approval function always denies).
+- 🌐 **MCP server** — the same tool registry is served to any MCP client
+  (Claude Code/Desktop, other agents) over streamable HTTP + bearer auth.
+  The approval gate is enforced **server-side**: a destructive call from an
+  external AI still lands as an Approve/Deny card on the operator's phone,
+  default-deny on timeout ([`mcp_server.py`](Agent_AI/mcp_server.py)).
 - 🔎 **Local RAG** — BM25 lexical search over your markdown runbooks answers
   *"how do I…"* questions fully offline.
 
