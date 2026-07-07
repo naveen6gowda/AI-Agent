@@ -48,7 +48,7 @@ from langgraph.prebuilt import tools_condition
 from langgraph.types import Command, interrupt
 
 from catalog import KNOWN_DESTRUCTIVE, destructive_tools
-from models import agent_llm, agent_provider
+from models import LLMUnavailable, agent_llm, agent_provider, fallback_llm, has_fallback
 from models import get_active_model as _get_active_model
 from registry import _TOOLS, _TOOLS_BY_NAME
 from tools import _audit, request_telegram_approval
@@ -147,8 +147,10 @@ Docker rules (Debian13 host, via Portainer):
 - list_docker_containers / check_docker_container are read-only — use them to
   confirm a container is exited or unhealthy BEFORE proposing a restart.
 - restart_docker_container is DESTRUCTIVE and gated. Restart only a container
-  that is exited/unhealthy or that the user explicitly named, one at a time;
-  don't restart a healthy running container.
+  that is exited/unhealthy or that the user explicitly named, one at a time.
+  Never restart a healthy container on your own initiative — but when the
+  operator EXPLICITLY orders a restart, propose the call and let the approval
+  gate decide; do not refuse on their behalf.
 - AdGuard runs here and is the LAN's DNS resolver — warn that restarting it
   briefly interrupts DNS for the whole network.
 
@@ -257,15 +259,39 @@ def _record_llm_observation(response, model: str) -> None:
 @_observe(name="agent-llm", as_type="generation",
           capture_input=False, capture_output=False)
 def _invoke_resilient(bound, messages):
+    """Primary → (retry on reload) → fallback endpoint → LLMUnavailable.
+
+    The chain (Phase 5): transient reload markers get one patient
+    retry; a dead server gets one shot at the MLX_FALLBACK_* endpoint
+    if configured; past that we raise LLMUnavailable so the frontends
+    can tell the operator the truth instead of a stack trace.
+    """
     model = _ACTIVE.get("model") or _get_active_model()
     try:
         response = bound.invoke(messages)
     except Exception as e:
-        if any(m in str(e).lower() for m in _RELOAD_MARKERS):
+        msg = str(e).lower()
+        if any(m in msg for m in _RELOAD_MARKERS):
             print(f"[agent] LLM transient ({type(e).__name__}); "
                   f"waiting for model reload, retrying once")
             time.sleep(6)
             response = bound.invoke(messages)
+        elif any(m in msg for m in ("connect", "connection", "timed out",
+                                    "timeout", "unreachable")):
+            if has_fallback():
+                print(f"[agent] primary LLM unreachable ({type(e).__name__}); "
+                      f"trying fallback endpoint")
+                try:
+                    response = fallback_llm().bind_tools(_TOOLS).invoke(messages)
+                    model = "fallback"
+                except Exception as e2:
+                    raise LLMUnavailable(
+                        "primary and fallback LLM both unreachable "
+                        f"({type(e).__name__} / {type(e2).__name__})") from e2
+            else:
+                raise LLMUnavailable(
+                    f"LLM server unreachable ({type(e).__name__}) and no "
+                    "fallback configured") from e
         else:
             raise
     _record_llm_observation(response, model)

@@ -71,3 +71,35 @@ def test_every_registry_tool_gets_a_valid_schema():
     for t in registry.TOOLS:
         schema = mcp_server._input_schema(t)
         assert schema.get("type") == "object", t.name
+
+
+# ── LLM fallback chain (Phase 5) ────────────────────────────────────
+
+
+class _DeadLLM:
+    def invoke(self, _msgs):
+        raise RuntimeError("Connection refused by llm.test")
+
+
+def test_dead_llm_without_fallback_raises_llm_unavailable(monkeypatch):
+    import agent_v5_approval as agent
+    from models import LLMUnavailable
+    monkeypatch.setattr(agent, "has_fallback", lambda: False)
+    with pytest.raises(LLMUnavailable):
+        agent._invoke_resilient(_DeadLLM(), [])
+
+
+def test_dead_llm_uses_fallback_when_configured(monkeypatch):
+    import agent_v5_approval as agent
+
+    class _FallbackLLM:
+        def bind_tools(self, _tools):
+            return self
+
+        def invoke(self, _msgs):
+            return "fallback-answer"
+
+    monkeypatch.setattr(agent, "has_fallback", lambda: True)
+    monkeypatch.setattr(agent, "fallback_llm", lambda: _FallbackLLM())
+    monkeypatch.setattr(agent, "_record_llm_observation", lambda *a: None)
+    assert agent._invoke_resilient(_DeadLLM(), []) == "fallback-answer"

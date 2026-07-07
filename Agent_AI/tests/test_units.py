@@ -156,3 +156,51 @@ def test_gate_set_is_union_never_weaker():
     stricter."""
     import agent_v5_approval as agent
     assert agent._FALLBACK_DESTRUCTIVE <= agent.DESTRUCTIVE_TOOLS
+
+
+# ── memory before prune (Phase 5) ───────────────────────────────────
+
+
+def _seed_with_messages(saver, thread_id, ts):
+    from langchain_core.messages import AIMessage, HumanMessage
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    checkpoint = {
+        "v": 1, "id": "00000000-0000-0000-0000-000000000001",
+        "ts": ts.isoformat(),
+        "channel_values": {"messages": [
+            HumanMessage("is pihole healthy?"),
+            AIMessage("pihole is running and healthy."),
+        ]},
+        "channel_versions": {}, "versions_seen": {},
+    }
+    saver.put(config, checkpoint, {"source": "test", "step": 0}, {})
+
+
+def test_pruned_thread_leaves_a_memory_note(tmp_path, monkeypatch):
+    db = str(tmp_path / "ckpt.sqlite")
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with SqliteSaver.from_conn_string(db) as saver:
+        _seed_with_messages(saver, "old-chat", old)
+
+    mem_dir = tmp_path / "memory"
+    monkeypatch.setattr(cm, "MEMORY_DIR", str(mem_dir))
+    # 03:30 reality: the LLM host is asleep — digest path must kick in
+    monkeypatch.setattr(cm, "_llm_summary", lambda _t: None)
+    cm.prune(db, keep_days=14, keep_per_thread=4, dry_run=False)
+
+    notes = list(mem_dir.glob("*.md"))
+    assert len(notes) == 1 and "old-chat" in notes[0].name
+    body = notes[0].read_text()
+    assert "is pihole healthy?" in body
+    assert "deterministic digest" in body
+
+
+def test_no_memory_flag_skips_notes(tmp_path, monkeypatch):
+    db = str(tmp_path / "ckpt.sqlite")
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with SqliteSaver.from_conn_string(db) as saver:
+        _seed_with_messages(saver, "old-chat", old)
+    mem_dir = tmp_path / "memory"
+    monkeypatch.setattr(cm, "MEMORY_DIR", str(mem_dir))
+    cm.prune(db, keep_days=14, keep_per_thread=4, dry_run=False, memory=False)
+    assert not mem_dir.exists()

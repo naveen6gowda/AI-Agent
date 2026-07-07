@@ -191,3 +191,56 @@ def helper_llm(temperature: float = 0.0, max_tokens: int = 512):
     return _mlx(temperature=temperature,
                 max_tokens=max(max_tokens, _HELPER_MIN_TOKENS),
                 timeout=_HELPER_TIMEOUT)
+
+
+# -------------------------------------------------------------------
+# Availability + fallback (Phase 5)
+# -------------------------------------------------------------------
+class LLMUnavailable(RuntimeError):
+    """The LLM server (and the fallback, if configured) is unreachable.
+
+    Raised instead of a raw connection error so callers can give the
+    operator an honest, actionable message. The monitors never see
+    this: they are deterministic and do not need the LLM to detect
+    problems — only summaries degrade.
+    """
+
+
+# A second OpenAI-compatible endpoint to try when the primary is down
+# (e.g. a llama.cpp box, a second workstation, or a cloud proxy). Unset
+# by default: local-first, no silent cloud spend.
+_FALLBACK_BASE_URL = os.getenv("MLX_FALLBACK_BASE_URL", "")
+_FALLBACK_MODEL = os.getenv("MLX_FALLBACK_MODEL", "")
+_FALLBACK_API_KEY = os.getenv("MLX_FALLBACK_API_KEY", "not-used")
+
+
+def llm_available(timeout: float = 3.0) -> bool:
+    """Quick probe of the primary server — cheap enough to gate a turn on."""
+    try:
+        r = httpx.get(f"{_MLX_BASE_URL}/models",
+                      headers={"Authorization": f"Bearer {_MLX_API_KEY}"},
+                      timeout=timeout)
+        return r.status_code < 500
+    except httpx.HTTPError:
+        return False
+
+
+def has_fallback() -> bool:
+    return bool(_FALLBACK_BASE_URL and _FALLBACK_MODEL)
+
+
+def fallback_llm(temperature: float = 0.0, max_tokens: int = 2048,
+                 timeout: float | None = None):
+    """ChatOpenAI client for the fallback endpoint. Only call if
+    has_fallback() — raises LLMUnavailable otherwise."""
+    if not has_fallback():
+        raise LLMUnavailable("no fallback LLM configured (MLX_FALLBACK_BASE_URL)")
+    return ChatOpenAI(
+        base_url=_FALLBACK_BASE_URL,
+        api_key=_FALLBACK_API_KEY,
+        model=_FALLBACK_MODEL,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout or _AGENT_TIMEOUT,
+        max_retries=1,
+    )

@@ -34,6 +34,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 DEFAULT_DBS = ["var/bot_checkpoints.sqlite", "var/checkpoints.sqlite"]
@@ -90,6 +91,98 @@ def stale_threads(db: str, cutoff: datetime) -> list[str]:
     return stale
 
 
+MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "docs", "memory")
+
+
+def _thread_transcript(saver, thread_id: str):
+    """(condensed transcript, tool names) for a thread, or None if it
+    holds no human conversation worth remembering."""
+    tup = saver.get_tuple({"configurable": {"thread_id": thread_id}})
+    msgs = ((tup.checkpoint or {}).get("channel_values") or {}).get("messages") \
+        if tup else None
+    if not msgs:
+        return None
+    lines, tools_used = [], set()
+    for m in msgs:
+        for tc in (getattr(m, "tool_calls", None) or []):
+            tools_used.add(tc.get("name", "?"))
+        mtype = getattr(m, "type", "")
+        content = str(getattr(m, "content", "")).strip()
+        if mtype in ("human", "ai") and content:
+            lines.append(f"{mtype}: {content[:400]}")
+    if not any(ln.startswith("human:") for ln in lines):
+        return None
+    return "\n".join(lines[-60:]), sorted(tools_used)
+
+
+def _llm_summary(transcript: str):
+    """5–8 durable bullet points via the local helper LLM, or None.
+    The nightly run happens at 03:30 — the LLM host may well be asleep,
+    so failure here is EXPECTED and must never block the prune."""
+    try:
+        from models import helper_llm
+        resp = helper_llm(max_tokens=400).invoke(
+            "Summarize this operator/agent conversation as 5-8 short "
+            "bullet points. Keep only durable facts, decisions, and "
+            "outcomes — drop greetings and dead ends.\n\n" + transcript[-8000:])
+        text = str(getattr(resp, "content", "")).strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def summarize_thread_to_memory(saver, thread_id: str,
+                               memory_dir: str | None = None):
+    """Write a memory note for a thread about to be deleted.
+
+    LLM summary when the model is reachable, else a deterministic
+    digest — the prune must never lose a conversation silently just
+    because the LLM host is asleep. Returns the path or None."""
+    memory_dir = memory_dir or MEMORY_DIR
+    data = _thread_transcript(saver, thread_id)
+    if data is None:
+        return None
+    transcript, tools_used = data
+    summary = _llm_summary(transcript)
+    if summary is None:
+        humans = [ln for ln in transcript.splitlines() if ln.startswith("human:")]
+        ais = [ln for ln in transcript.splitlines() if ln.startswith("ai:")]
+        summary = ("(deterministic digest — LLM unreachable at prune time)\n"
+                   f"- first request: {humans[0][7:] if humans else '?'}\n"
+                   f"- last request: {humans[-1][7:] if humans else '?'}\n"
+                   f"- last answer: {ais[-1][4:] if ais else '?'}")
+    os.makedirs(memory_dir, exist_ok=True)
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    path = os.path.join(memory_dir, f"{day}-{thread_id[:40]}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"# Conversation memory — {thread_id}\n\n"
+                f"Archived {day} by checkpoint retention, before pruning.\n"
+                f"Tools used: {', '.join(tools_used) or 'none'}\n\n"
+                f"{summary}\n")
+    log(f"[memory] {thread_id} -> {path}")
+    return path
+
+
+def cleanup_approvals(max_age_s: float = 86400.0) -> int:
+    """Sweep stale var/approvals decision files (MCP requests that
+    timed out before the operator tapped)."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "var", "approvals")
+    removed = 0
+    if os.path.isdir(base):
+        cutoff = time.time() - max_age_s
+        for name in os.listdir(base):
+            fp = os.path.join(base, name)
+            try:
+                if os.path.getmtime(fp) < cutoff:
+                    os.unlink(fp)
+                    removed += 1
+            except OSError:
+                continue
+    return removed
+
+
 def delete_threads(db: str, threads: list[str]) -> None:
     from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -98,7 +191,8 @@ def delete_threads(db: str, threads: list[str]) -> None:
             saver.delete_thread(thread_id)
 
 
-def prune(db: str, keep_days: int, keep_per_thread: int, dry_run: bool) -> None:
+def prune(db: str, keep_days: int, keep_per_thread: int, dry_run: bool,
+          memory: bool = True) -> None:
     before = size_mb(db)
     cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
 
@@ -122,6 +216,14 @@ def prune(db: str, keep_days: int, keep_per_thread: int, dry_run: bool) -> None:
     stale = stale_threads(db, cutoff)
     log(f"[{db}] threads idle > {keep_days}d: {len(stale)}")
     if stale and not dry_run:
+        if memory:
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            with SqliteSaver.from_conn_string(db) as saver:
+                for tid in stale:
+                    try:
+                        summarize_thread_to_memory(saver, tid)
+                    except Exception as e:
+                        log(f"[memory] skipped {tid}: {type(e).__name__}: {e}")
         delete_threads(db, stale)
 
     # 2. cap history of surviving threads + 3. orphaned writes + 4. vacuum
@@ -181,6 +283,8 @@ def main() -> int:
                     help="stop sentinel-bot during the prune (needed for VACUUM)")
     ap.add_argument("--dry-run", action="store_true",
                     help="report only; delete nothing")
+    ap.add_argument("--no-memory", action="store_true",
+                    help="skip writing docs/memory notes for pruned threads")
     args = ap.parse_args()
 
     dbs = args.db or [d for d in DEFAULT_DBS if os.path.exists(d)]
@@ -193,7 +297,8 @@ def main() -> int:
             restart_bot = True
         for db in dbs:
             try:
-                prune(db, args.keep_days, args.keep_per_thread, args.dry_run)
+                prune(db, args.keep_days, args.keep_per_thread, args.dry_run,
+                      memory=not args.no_memory)
             except sqlite3.OperationalError as e:
                 failed = True
                 log(f"[{db}] ERROR: {e} (bot still running? use --stop-bot)")
@@ -201,6 +306,17 @@ def main() -> int:
         if restart_bot:
             log(f"restarting {BOT_UNIT}")
             systemctl("start")
+    if not args.dry_run:
+        removed = cleanup_approvals()
+        if removed:
+            log(f"[approvals] swept {removed} stale decision files")
+        if not args.no_memory:
+            try:
+                from rag import ingest
+                stats = ingest()
+                log(f"[memory] RAG re-ingested: {stats}")
+            except Exception as e:
+                log(f"[memory] RAG ingest skipped: {type(e).__name__}: {e}")
     return 1 if failed else 0
 
 

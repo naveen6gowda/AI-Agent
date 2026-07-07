@@ -52,6 +52,7 @@ load_dotenv()
 # string) and the underlying graph. We do NOT import the old polling
 # request_telegram_approval — the bot supplies its own.
 from agent_v5_approval import run_one  # noqa: E402
+from models import LLMUnavailable as _LLMUnavailable
 from models import (
     get_active_model as _get_active_model,
 )
@@ -497,6 +498,11 @@ def _run_for_chat(checkpointer, chat_id: str, text: str,
                 approval_fn=request_approval_via_bot,
                 checkpointer=checkpointer,
             )
+        except _LLMUnavailable as e:
+            answer = ("⚠️ The local LLM server is unreachable "
+                      "(is the Mac awake and LM Studio running?). "
+                      "Monitors and alerts keep working — only chat needs "
+                      f"the model.\n\ndetail: {e}")
         except Exception as e:
             answer = f"❌ Internal error: {type(e).__name__}: {e}"
             # LM Studio's MLX engine reports a model it can't execute as

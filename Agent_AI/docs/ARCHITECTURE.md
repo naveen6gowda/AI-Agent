@@ -121,7 +121,7 @@ Each phase is independently shippable and leaves the system running.
   server (atomic file IPC). 10 gate tests mirror the in-process suite;
   resources: sentinel://catalog, sentinel://audit-log.
 
-### Phase 5 — Agentic maturity (the interview differentiators)
+### Phase 5 — Agentic maturity (the interview differentiators) — ✅ shipped 2026-07-07
 - **Eval harness**: golden set of ~30 prompts with expected tool-call
   sequences; runs in CI against the local model; results tracked in Langfuse.
   Model swaps become measurable regressions, not vibes.
@@ -130,7 +130,19 @@ Each phase is independently shippable and leaves the system running.
 - **Long-term memory**: before the nightly prune deletes old checkpoints,
   summarize them into `docs/memory/` — the RAG index becomes the agent's
   durable memory.
-- Prometheus textfile metrics from monitors + a Grafana dashboard.
+- ~~Prometheus textfile metrics from monitors + a Grafana dashboard~~ —
+  skipped by operator choice (2026-07-07).
+- **Outcome:** evals/ golden set (12 cases incl. two safety cases) drives
+  the real graph with deny-all interrupts; first run: 11/12 on
+  qwen3.6-35b-a3b@iq3_s in ~5 min. The failure is a real finding — the
+  model refuses an explicit operator restart order for a healthy-looking
+  container through two prompt iterations; tracked as known_fail (XFAIL)
+  for cross-model comparison in Langfuse. LLM fallback chain:
+  primary → reload-retry → optional MLX_FALLBACK_* endpoint → typed
+  LLMUnavailable with an honest bot message. Long-term memory: the
+  nightly prune summarizes threads into docs/memory/ (LLM bullets, or a
+  deterministic digest when the LLM host sleeps) and re-ingests the RAG
+  index — conversations outlive their checkpoints.
 
 ## 5. What this demonstrates (interview mapping)
 
