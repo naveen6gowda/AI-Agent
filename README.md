@@ -36,9 +36,10 @@ Read them in order and you've learned how to build agents.
 
 > 📚 **New here?** [`Agent_AI/sentinel-learning-guide.md`](Agent_AI/sentinel-learning-guide.md)
 > is a complete, file-by-file teaching guide to the whole system.
-> 📐 **Where it's going:** [`Agent_AI/docs/ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md)
-> is the honest architecture review + the phased roadmap (tool registry → MCP
-> server → eval harness).
+> 📐 **How it got here:** [`Agent_AI/docs/ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md)
+> is the honest architecture review whose phased roadmap (tool registry → MCP
+> server → eval harness) is now fully shipped — see [`registry.py`](Agent_AI/registry.py),
+> [`mcp_server.py`](Agent_AI/mcp_server.py), and [`evals/`](Agent_AI/evals/).
 
 ---
 
@@ -328,6 +329,6 @@ Full details in [`Agent_AI/README.md`](Agent_AI/README.md).
 <div align="center">
 
 Part of my homelab work — see the
-**[portfolio ↗](https://github.com/naveen6gowda/homelab-projects)**
+**[portfolio ↗](https://github.com/naveen6gowda/Portfolio)**
 
 </div>
