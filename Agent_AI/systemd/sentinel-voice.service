@@ -11,6 +11,9 @@ WorkingDirectory=/opt/sentinel
 ExecStart=/root/.local/bin/uv run python voice_server.py
 Restart=on-failure
 RestartSec=10
+# uv run exits 143 on SIGTERM and langfuse atexit turns SIGINT into 130:
+# a normal stop/restart is not a failure (was firing false OnFailure pages).
+SuccessExitStatus=130 143
 KillSignal=SIGINT
 TimeoutStopSec=15
 StandardOutput=journal

@@ -34,6 +34,37 @@ def test_external_id_is_stable_per_posted():
     assert a["external_id"] == b["external_id"] != c["external_id"]
 
 
+def test_direct_debit_collected_parses():
+    r = finance_parser.parse(
+        "Your direct debit payment of €81.00 has been collected by "
+        "VATTENFALL EUROPE SALES.", posted="1")
+    assert r["parsed"] and r["kind"] == "direct_debit_collected"
+    assert r["direction"] == "withdrawal" and r["amount"] == "81.00"
+    assert r["merchant"] == "VATTENFALL EUROPE SALES"
+    assert "collected" in r["tags"]
+
+
+def test_bank_initiated_id_survives_redelivery():
+    """A re-delivered notification gets a fresh post_time; deposits must
+    still dedupe (one €92.40 transfer booked twice on 2026-07-09)."""
+    text = "You received €92.40 from BFZ GGMBH"
+    a = finance_parser.parse(text, posted="111")
+    b = finance_parser.parse(text, posted="222")
+    assert a["external_id"] == b["external_id"]
+
+
+def test_null_message_is_empty_not_unrecognized():
+    r = finance_parser.parse("null", posted="1")
+    assert not r["parsed"] and r["reason"] == "empty_message"
+
+
+def test_null_title_never_becomes_asset_account():
+    r = finance_parser.parse("Parkgarage Maximilians 9,00 €",
+                             posted="1", title="null")
+    assert r["parsed"] and r["kind"] == "wallet_payment"
+    assert "asset_account" not in r
+
+
 # ── catalog (policy as data) ────────────────────────────────────────
 
 
@@ -147,7 +178,8 @@ def test_catalog_without_policy_block_keeps_full_default(tmp_path):
     catalog_mod.clear_cache()
     cat = catalog_mod.load_catalog(p)
     assert set(cat.policy.destructive_tools) == {
-        "restart_lxc", "restart_docker_container", "call_ha_service"}
+        "restart_lxc", "restart_vm", "restart_docker_container",
+        "call_ha_service"}
 
 
 def test_gate_set_is_union_never_weaker():

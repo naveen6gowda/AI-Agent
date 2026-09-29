@@ -46,7 +46,8 @@ uv run python evals/run_evals.py --limit 3   # golden scenarios — needs a live
 
 `systemd/` contains the units used for the live 24/7 deployment: **4
 long-running services** (Telegram bot, Alexa voice bridge, finance bridge,
-MCP server), **8 timers** (monitors + nightly maintenance), and the
+MCP server), **11 timers** (monitors, nightly maintenance and the git
+mirror), and the
 `sentinel-failure-alert@.service` template that pages the operator whenever
 any unit fails.
 
@@ -57,7 +58,7 @@ any unit fails.
 | Layer | File | What it does |
 |------|------|--------------|
 | **Brain** | `agent_v5_approval.py` | **Production agent** — LangGraph `interrupt()` approval gate, SQLite checkpointer, Langfuse tracing, resilient LLM call (reload-retry → fallback endpoint → `LLMUnavailable`) |
-| | `registry.py` | All 29 `@tool` definitions in one catalog (`TOOLS` / `TOOLS_BY_NAME`), shared by agent, MCP server and tests |
+| | `registry.py` | All 32 `@tool` definitions in one catalog (`TOOLS` / `TOOLS_BY_NAME`), shared by agent, MCP server and tests |
 | | `legacy/` | The 5-lesson course that led here (v1 raw loop → v4 tracing) — archived, not live |
 | **Front-ends** | `sentinel_bot.py` | Long-running Telegram bot (single-poller + event-based approvals, `/model` switcher) |
 | | `voice_server.py` / `voice.py` | FastAPI Alexa bridge — read-only by construction |
@@ -71,11 +72,16 @@ any unit fails.
 | | `smart_monitor.py` | SMART disk health over SSH (`smartctl`) |
 | | `speedtest_monitor.py` | Internet speed — download / upload / latency |
 | | `backup_verifier.py` | Backup freshness vs `max_backup_age_h` |
-| | `docker_tools.py` | Container health + gated restart via Portainer REST |
+| | `docker_tools.py` | Container health, *Restart / Leave it* approval cards, `expected_down` allowlist — via Portainer REST |
+| | `guest_monitor.py` | Every Proxmox VM/LXC: running state + real memory |
+| | `esphome_monitor.py` | ESPHome nodes online/offline via Home Assistant, grace period for OTA reboots |
 | | `presence_assistant.py` | Read-only Home Assistant presence/light/climate |
 | | `energy_assistant.py` | Reset-aware energy deltas + tariff costing |
 | **Reliability** | `checkpoint_maintenance.py` | Nightly checkpoint-DB retention: prune idle threads, cap history, VACUUM |
-| | `failure_alert.py` | `OnFailure=` hook → Telegram page with the journal tail; independent of the LLM stack |
+| | `failure_alert.py` | `OnFailure=` hook → plain-English Telegram page with the journal tail; independent of the LLM stack |
+| | `alert_state.py` | Transition paging: one DOWN, one RECOVERED, a reminder every 6 h, quiet hours for non-critical |
+| | `git_mirror.sh` | Nightly commit → ruff → pytest → push; a failing gate pages instead of pushing |
+| | `langfuse_compat.py` | Shim so Langfuse's LangChain callback works on LangChain 1.x (import before langfuse) |
 | **Knowledge** | `rag.py` | BM25 lexical RAG over `docs/*.md` (local, no embeddings) |
 | **Quality** | `tests/` | pytest suite — policy-gate invariants, clients, MCP, eval mechanics, retention |
 | | `evals/` | `golden.yaml` scenarios + `run_evals.py`: the real graph against the live model, deny-all interrupts |

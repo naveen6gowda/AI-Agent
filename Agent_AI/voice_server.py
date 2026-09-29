@@ -28,6 +28,7 @@ See docs/voice-setup.md for the Home Assistant + Alexa configuration.
 
 from __future__ import annotations
 
+import hmac
 import os
 import sys
 from typing import Optional
@@ -68,7 +69,7 @@ def _check_auth(authorization: Optional[str], token_q: Optional[str]) -> None:
         supplied = authorization[7:].strip()
     if not supplied:
         supplied = token_q
-    if supplied != TOKEN:
+    if not supplied or not hmac.compare_digest(supplied.encode(), TOKEN.encode()):
         raise HTTPException(status_code=401, detail="invalid or missing token")
 
 

@@ -11,8 +11,12 @@ Langfuse keys are forced empty so @observe tracing stays off during tests.
 """
 
 import os
+import tempfile
 
 _DEFAULTS = {
+    # keep synthetic approval/tool events out of the production audit trail
+    "AUDIT_LOG_PATH": os.path.join(tempfile.gettempdir(),
+                                   "sentinel-test-audit.log"),
     "PROXMOX_HOST": "pve.test",
     "PROXMOX_PORT": "8006",
     "PROXMOX_TOKEN_ID": "ci@pve!tester",
@@ -30,9 +34,20 @@ _DEFAULTS = {
     "MLX_BASE_URL": "http://llm.test:1234/v1",
     "MLX_MODEL": "ci-model",
     "MLX_API_KEY": "dummy",
+    "FIREFLY_URL": "http://firefly.test:8212",
+    "FIREFLY_TOKEN": "dummy-firefly",
+    "FINANCE_ASSET_ACCOUNT": "N26",
     "LANGFUSE_PUBLIC_KEY": "",
     "LANGFUSE_SECRET_KEY": "",
     "LANGSMITH_TRACING": "false",
 }
 for _k, _v in _DEFAULTS.items():
     os.environ.setdefault(_k, _v)
+
+# Public mirror: the real catalog.yaml is private (gitignored). Tests that
+# check "the real catalog" fall back to the committed template, so CI still
+# validates the file people copy.
+import catalog as _catalog  # noqa: E402
+
+if not _catalog.DEFAULT_PATH.exists():
+    _catalog.DEFAULT_PATH = _catalog.DEFAULT_PATH.with_name("catalog.example.yaml")

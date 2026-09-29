@@ -93,10 +93,11 @@ POLL_TIMEOUT_S = int(os.getenv("BOT_POLL_TIMEOUT_S", "25"))
 # Telegram I/O helpers
 # ----------------------------------------------------------------------
 def _send_message(chat_id: str, text: str,
-                  reply_markup: Optional[dict] = None) -> Optional[int]:
+                  reply_markup: Optional[dict] = None,
+                  silent: bool = False) -> Optional[int]:
     """Send text. Splits >4000 chars at the last newline to stay under
     Telegram's 4096 limit. Returns the message_id of the last chunk,
-    or None on failure."""
+    or None on failure. silent=True = no notification sound."""
     if not text:
         return None
     chunks = []
@@ -115,6 +116,8 @@ def _send_message(chat_id: str, text: str,
         payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
         if reply_markup and i == len(chunks) - 1:
             payload["reply_markup"] = reply_markup
+        if silent:
+            payload["disable_notification"] = True
         try:
             r = httpx.post(f"{_TG_BASE}/sendMessage", json=payload, timeout=10.0)
             body = r.json()
@@ -152,19 +155,24 @@ def _get_updates(offset: Optional[int]) -> list:
         r = httpx.get(f"{_TG_BASE}/getUpdates", params=params,
                       timeout=POLL_TIMEOUT_S + 10)
         body = r.json()
-        if not body.get("ok"):
-            print(f"[bot] getUpdates NOT OK: {body.get('description')}  "
-                  f"error_code={body.get('error_code')}")
-            return []
-        result = body.get("result", [])
-        if result:
-            print(f"[bot] getUpdates returned {len(result)} update(s)  "
-                  f"(used offset={offset})")
-        return result
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
+        # ValueError = a non-JSON body (an HTML error page from a proxy):
+        # it used to escape this function and crash the bot.
         print(f"[bot] poll error: {e}")
         time.sleep(2)
         return []
+    if not body.get("ok"):
+        print(f"[bot] getUpdates NOT OK: {body.get('description')}  "
+              f"error_code={body.get('error_code')}")
+        # Telegram answers 502 / 409 instantly — without a pause this loop
+        # re-polls at full speed for as long as the error lasts.
+        time.sleep(5)
+        return []
+    result = body.get("result", [])
+    if result:
+        print(f"[bot] getUpdates returned {len(result)} update(s)  "
+              f"(used offset={offset})")
+    return result
 
 
 def _latest_update_id() -> Optional[int]:
@@ -349,14 +357,33 @@ def _handle_model_pick(cb: dict, idx_str: str) -> None:
     threading.Thread(target=_probe_and_set, daemon=True).start()
 
 
-def _handle_mcp_approval(cb: dict, payload: str) -> None:
-    """Decision tap for a pending MCP-server approval (mcpapp:<rid>:<d>).
+def _apply_docker_tap(rid: str, decision: str, by: str) -> None:
+    """Hand a tapped restart card straight to docker_tools (worker thread).
 
-    The MCP server cannot poll Telegram — this bot is the single
+    A no-op for MCP-server approvals: those rids are not in the monitor's
+    ask state, so apply_tapped_decision returns None and leaves the decision
+    file for the MCP server's own watcher.
+    """
+    try:
+        import docker_tools
+        applied = docker_tools.apply_tapped_decision(rid, decision, by)
+        if applied:
+            print(f"[bot] docker tap applied immediately: "
+                  f"{applied['container']} -> {applied['decision']}")
+    except Exception as e:
+        print(f"[bot] docker tap apply failed for {rid}: "
+              f"{type(e).__name__}: {e}")
+
+
+def _handle_mcp_approval(cb: dict, payload: str) -> None:
+    """Decision tap for a pending file-IPC approval (mcpapp:<rid>:<d>).
+
+    The requester cannot poll Telegram — this bot is the single
     getUpdates consumer — so it parks the request and watches
     var/approvals/<rid>.json. We own the button tap; we write the file
-    (atomically, so the watcher never reads a half-write). See
-    mcp_server.request_operator_approval.
+    (atomically, so the watcher never reads a half-write). Used by the
+    MCP server (mcp_server.request_operator_approval) and the docker
+    monitor's restart cards (docker_tools.handle_restart_approvals).
     """
     rid, _, decision = payload.partition(":")
     if decision not in ("approved", "denied") or not rid.isalnum():
@@ -371,11 +398,25 @@ def _handle_mcp_approval(cb: dict, payload: str) -> None:
         {"decision": decision, "by": user, "ts": time.time()}))
     tmp.replace(path)
     _answer_callback(cb["id"], f"{decision} \u2713")
+
+    # Apply the tap NOW rather than leaving it for the next scheduled run.
+    # The docker monitor is a 10-minute oneshot: once its short inline wait
+    # is over nobody is watching the decision file, so a tap used to sit
+    # unapplied for up to ~10 minutes. docker_tools claims the decision
+    # atomically, so this races safely with a monitor that is still waiting.
+    # Off the poller thread: a Portainer restart can take tens of seconds and
+    # this thread must stay free to deliver the next update.
+    threading.Thread(target=_apply_docker_tap, args=(rid, decision, user),
+                     daemon=True).start()
+
     msg = cb.get("message") or {}
     if msg.get("message_id"):
         icon = "\u2705" if decision == "approved" else "\u26d4"
+        # Keep the original card text so the history shows WHAT was
+        # decided, not just the request id.
+        base = (msg.get("text") or f"request {rid}").strip()
         _edit_message(str(msg["chat"]["id"]), msg["message_id"],
-                      f"{icon} MCP request {rid}: {decision} by {user}")
+                      f"{base}\n\n\u2192 {icon} {decision} by {user}")
     _audit("mcp_approval_tap", {"rid": rid, "decision": decision, "by": user})
 
 
@@ -390,6 +431,12 @@ def _handle_callback(cb: dict) -> None:
     parts = data.split(":", 1)
     if len(parts) != 2:
         _answer_callback(cb["id"], "malformed callback")
+        return
+    # Approval/model buttons only ever live in authorized chats, but check
+    # anyway — defense in depth if the bot is ever added to a group.
+    cb_chat = str((cb.get("message") or {}).get("chat", {}).get("id"))
+    if cb_chat not in AUTHORIZED_CHAT_IDS:
+        _answer_callback(cb["id"], "not authorized")
         return
     prefix, token = parts
     if prefix == "m":           # model picker, not an approval
@@ -413,7 +460,7 @@ def _handle_callback(cb: dict) -> None:
 
     _answer_callback(cb["id"], f"Recorded: {decision}")
     marker = "✅ APPROVED" if decision == "approved" else "❌ DENIED"
-    _edit_message(next(iter(AUTHORIZED_CHAT_IDS)), message_id,
+    _edit_message(cb_chat, message_id,
                   text + f"\n\n→ {marker} by @{user}")
 
     with _lock:
@@ -426,7 +473,32 @@ def _handle_callback(cb: dict) -> None:
 # Per-chat message dispatch
 # ----------------------------------------------------------------------
 _chat_locks: Dict[str, threading.Lock] = {}
-_chat_sessions: Dict[str, str] = {}  # chat_id → current thread_id
+
+# chat_id → current thread_id. Persisted: the nightly 03:30 maintenance
+# restarts the bot, and an in-memory map silently undid every /reset the
+# next morning (the chat snapped back to its old thread).
+_SESSIONS_FILE = Path(__file__).parent / "var" / "chat_sessions.json"
+
+
+def _load_sessions() -> Dict[str, str]:
+    try:
+        data = json.loads(_SESSIONS_FILE.read_text())
+        return {str(k): str(v) for k, v in data.items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _save_sessions() -> None:
+    try:
+        _SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _SESSIONS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_chat_sessions, indent=2))
+        tmp.replace(_SESSIONS_FILE)
+    except OSError as e:
+        print(f"[bot] could not persist chat sessions: {e}")
+
+
+_chat_sessions: Dict[str, str] = _load_sessions()
 
 HELP_TEXT = """HomelabSentinel — what I can help with:
 
@@ -470,8 +542,9 @@ def _thread_id_for(chat_id: str) -> str:
 
 def _reset_thread(chat_id: str) -> None:
     """Switch this chat to a fresh thread_id. Old state stays in sqlite
-    but isn't referenced — cleanup is a future maintenance task."""
+    until checkpoint_maintenance prunes it (idle > 14 days)."""
     _chat_sessions[chat_id] = f"chat-{chat_id}-{uuid.uuid4().hex[:6]}"
+    _save_sessions()
 
 
 def _typing_loop(chat_id: str, stop: threading.Event) -> None:
@@ -583,10 +656,11 @@ def main() -> int:
     offset = (skip_before + 1) if skip_before is not None else None
     print(f"[bot] starting offset = {offset}")
 
-    # Hello-on-startup so the operator knows the bot is live.
+    # Hello-on-startup so the operator knows the bot is live. Silent: the
+    # 03:30 checkpoint maintenance restarts the bot every night.
     for chat in AUTHORIZED_CHAT_IDS:
         _send_message(chat, "✅ HomelabSentinel bot online. "
-                             "Send /help for examples.")
+                             "Send /help for examples.", silent=True)
 
     with SqliteSaver.from_conn_string("var/bot_checkpoints.sqlite") as checkpointer:
         while True:

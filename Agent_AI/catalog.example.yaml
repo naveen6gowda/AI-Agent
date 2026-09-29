@@ -7,7 +7,8 @@
 # fast at startup instead of at 3am inside a monitor.
 #
 #   criticality   : critical | high | medium | lab   (how loudly to alert)
-#   restart_policy: ask | auto | never               (ask = needs your tap)
+#   restart_policy: ask | auto | never               (ask = needs your tap;
+#                   never = refused in code, even after an approval)
 # ======================================================================
 
 defaults:                         # inherited by any service that omits a field
@@ -19,11 +20,11 @@ defaults:                         # inherited by any service that omits a field
 services:
   # ---- critical infrastructure ----
   - vmid: 105
-    name: Router
+    name: OPNSense
     kind: qemu
     node: pve
     criticality: critical
-    purpose: "Router / firewall / DHCP / VLAN gateway"
+    purpose: "Router / firewall / DHCP / VLAN gateway (OPNsense)"
     max_backup_age_h: 24
     restart_policy: never         # restarting the router = whole-house outage
     endpoints:
@@ -104,3 +105,48 @@ energy:
       name: Refrigerator
     - entity_id: sensor.washer_total_energy
       name: Washing machine
+
+# Approval policy — tools that always stop at the human gate. Config can only
+# TIGHTEN the built-in set in catalog.py, never loosen it.
+policy:
+  destructive_tools:
+    - restart_lxc
+    - restart_vm
+    - restart_docker_container
+    - call_ha_service
+
+# Docker monitor — containers that are SUPPOSED to sit in "Exited (0)".
+# Explicit allowlist on purpose: `docker stop jellyfin` also exits 0 and must
+# keep alerting. Only a clean exit is ignored; a failed one-shot still pages.
+docker:
+  expected_down:
+    - name: "my-stack-init-1"    # globs allowed
+      reason: "one-shot init container, exits after setup"
+  expected_down_labels:          # or label the service instead
+    sentinel.expected_down: "true"
+
+# Alerting (alert_state.py) — page on the CHANGE: one DOWN, one RECOVERED,
+# a reminder every remind_after_h while it stays broken. critical rings any
+# time; high-only messages are delivered silently inside quiet_hours.
+alerting:
+  quiet_hours: [23, 7]
+  remind_after_h: 6
+
+# ESPHome devices (esphome_monitor.py) — online/offline via Home Assistant,
+# checked every 2 minutes. Offline = ALL entities unavailable for
+# offline_grace_s (rides out OTA flashes and reboots). Matched by MAC, then
+# name. monitor: false parks a device: listed, never alerted.
+esphome:
+  offline_grace_s: 180
+  devices:
+    - name: Office Monitor
+      mac: "02:00:00:00:00:01"
+      ip: office-monitor.lan
+    - name: Hall Clock
+      mac: "02:00:00:00:00:02"
+      ip: hall-clock.lan
+    - name: Plant Moisture
+      mac: "02:00:00:00:00:03"
+      ip: plant-moisture.lan
+      monitor: false
+      note: "deep-sleep node — HA keeps its last values, so it can't be watched this way"

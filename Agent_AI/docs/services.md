@@ -7,15 +7,15 @@ companion for the docs search. Keep them in sync when you change the catalog.
 ## Criticality levels
 
 - **critical** — page anytime, day or night (router, Home Assistant, network).
-- **high** — alert during waking hours; restart attempts allowed.
+- **high** — alerts too, but delivered silently from 23:00 to 07:00; restart attempts allowed (with approval).
 - **medium** — daily digest only.
 - **lab** — no alerts unless explicitly asked (dev / experiments).
 
 ## Restart policy
 
 - **ask** — agent must request operator approval (default, safest).
-- **auto** — agent may restart without asking (use sparingly).
-- **never** — agent never restarts; it suggests manual action only.
+- **auto** — reserved: not implemented, every restart still asks for approval.
+- **never** — enforced in code: the restart tools refuse this guest even if a restart is approved.
 
 ## Guests
 
@@ -29,8 +29,9 @@ Home Assistant Core — automations, energy, presence. API at
 http://homeassistant.lan:8123/api/ (auth via `HA_TOKEN`). Backups ≤ 24h.
 
 ### Hermes (vmid 101, lxc) — high, restart: ask
-Armis agent - R less suit. OpenAI-compatible API at
-http://hermes.lan:8383/v1 (auth via `HERMES_API_KEY`).
+The Hermes agent platform: gateway + dashboards. Reachability
+probes the unauthenticated gateway health JSON at
+http://hermes.lan:9119/api/status (`gateway_running` field).
 
 ### Debian13 (vmid 103, qemu) — high, restart: ask
 Docker host running ~27 containers (live count via Portainer): AdGuard DNS (the LAN's primary
@@ -44,11 +45,8 @@ TCP 53.
 HomelabSentinel itself — the agent + Telegram bot. If it dies, there is no
 agent. This is the LXC these docs and the code run on.
 
-### Windows10 (vmid 102, qemu) — lab, restart: never
-Desktop VM, started on demand. No backup urgency.
-
-### HACK-SEQUOIA (vmid 104, qemu) — lab, restart: never
-Pentest / sandbox VM. No backup urgency.
+(VMs 102 and 104 were destroyed; they were
+removed from the catalog on 2026-09-26.)
 
 ## Proxmox host
 
@@ -62,15 +60,25 @@ Pentest / sandbox VM. No backup urgency.
 
 ## Energy monitoring
 
-No whole-house meter — the energy assistant sums watched Tuya smart plugs as
-the total. Flat tariff: 30.40 ¢/kWh (EUR). Watched plugs: Refrigerator,
-Dishwasher, Washing machine, the operator laptop, Chaitra laptop, TV stand, Decor
-lights, Backlight. Caveat: the `*_total_energy` sensors reset ~once/day, so a
-24h window that straddles a reset under-reports; switch to HA Utility Meter
-helpers for billing-grade accuracy.
+No whole-house meter — the energy assistant sums watched Tuya smart plugs
+(LocalTuya `*_electricity` counters) as the total. Flat tariff: 30.40 ¢/kWh
+(EUR). Watched plugs: Refrigerator, Dishwasher, Washing machine, two laptops, TV stand, Decor lights, Backlight, Ryzen 7 PC. The
+counters reset often; the delta logic only sums upward steps, so a reset
+loses at most one reading. The washing machine currently has no reporting
+sensor in HA and shows "-".
 
-The assistant sums these 8 plugs **directly** — it does not read the HA Energy
-dashboard's grid group (`sensor.tracked_energy_total`). If that group watches a
-different plug set (e.g. it includes the omitted Ryzen 7 PC), the Telegram
-energy digest total will differ from the HA Energy dashboard. Keep the two plug
+The assistant sums these plugs **directly** — it does not read the HA Energy
+dashboard's grid group (`sensor.tracked_energy_total`). Keep the two plug
 lists in sync if you need them to agree.
+
+## ESPHome devices
+
+Sentinel watches ESPHome nodes through Home Assistant (the IoT VLAN is not routable from the Sentinel LXC). A node is online
+while any of its entities has a real state, and offline once all of them
+have been `unavailable` for 3 minutes. Watched (catalog `esphome:`,
+`monitor: true`): BathRoom Monitor, BedRoom Monitoring Display, EPaper, Hall
+Clock, Kitchen Display, LivingRoom Monitor, Office Monitor, S3 Dashboard.
+Parked (`monitor: false`, never alert): TV Remote, Plant Moisture (a
+deep-sleep MQTT-only node whose leftover HA entry always reads available).
+To start watching a parked node, set `monitor: true` for it in
+`catalog.yaml`. Ask the bot "are my ESP devices online?" for the live list.

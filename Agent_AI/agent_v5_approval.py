@@ -60,8 +60,11 @@ load_dotenv()
 import os as _os
 
 try:
+    # isort: off
+    import langfuse_compat  # noqa: F401  (must precede langfuse: aliases the legacy `langchain` modules langfuse<3 needs)
     from langfuse.decorators import langfuse_context as _lf_ctx
     from langfuse.decorators import observe as _observe
+    # isort: on
     _LF_ON = bool(_os.getenv("LANGFUSE_PUBLIC_KEY") and _os.getenv("LANGFUSE_SECRET_KEY"))
 except Exception:
     _LF_ON = False
@@ -102,8 +105,9 @@ respond, do not blindly retry.
 
 Each tool's own description (provided to you with its schema) explains its
 arguments and when to use it — don't expect a tool list here. Read tools are
-safe to call freely; restart_lxc and call_ha_service are DESTRUCTIVE and are
-gated by operator approval; send_telegram_alert is informational.
+safe to call freely; restart_lxc, restart_vm, restart_docker_container and
+call_ha_service are DESTRUCTIVE and are gated by operator approval;
+send_telegram_alert is informational.
 
 Discovery rules (in order of preference):
 1. CHECK THE CATALOG FIRST. get_service_catalog tells you what the
@@ -111,8 +115,11 @@ Discovery rules (in order of preference):
    Trust the catalog's criticality and restart_policy fields.
 2. For "is everything OK?" questions, call check_reachability FIRST —
    it probes every catalogued endpoint in parallel and tells you which
-   are down in one tool call. Only drill into check_proxmox_status /
-   get_ha_entity for services that came back down or degraded.
+   are down in one tool call. For "how are my VMs / how is memory /
+   is anything overloaded?", call check_all_guests — it returns state,
+   memory, CPU and a verdict for EVERY guest in one call. Only drill
+   into check_proxmox_status / get_ha_entity for the ones that came
+   back down or degraded.
 3. If a service has restart_policy="never", DO NOT call restart_lxc —
    alert via send_telegram_alert instead.
 4. If you need live inventory (a new VM not in the catalog),
@@ -134,11 +141,21 @@ Memory-pressure rules (READ CAREFULLY):
   restart decision. If guest exec still fails, do NOT recommend restart
   based on memory alone — alert the operator instead and ask them to
   enable qemu-guest-agent on that VM.
+- check_all_guests returns a verdict per guest. 'mem_unreliable' means the
+  READING cannot be trusted (no guest agent), NOT that memory is high —
+  never propose a restart for it; the fix is installing qemu-guest-agent.
+  'missing' means the guest is in catalog.yaml but gone from Proxmox, and
+  untracked_guests are live guests missing from the catalog: both are
+  catalog drift for the operator to edit, never something to restart.
 
 Decision rules:
 - ALWAYS check status before recommending a destructive change.
+- Pick the restart tool by KIND, from the catalog: kind='lxc' ->
+  restart_lxc, kind='qemu' -> restart_vm. They are different Proxmox
+  endpoints; the wrong one is refused with an error telling you which to
+  use. Most of this homelab is qemu (OPNSense, HomeAssistant, Debian13).
 - If mem_pct > 85 AND mem_pct_source in ('guest','host_cgroup')
-  AND restart_policy != "never", recommend restart_lxc.
+  AND restart_policy != "never", recommend the matching restart tool.
 - If a container/VM is stopped AND it's critical/high AND
   restart_policy != "never", restart it AND alert.
 - Explain your reasoning briefly at the end.
@@ -213,51 +230,30 @@ _RELOAD_MARKERS = ("model has crashed", "model loading", "failed to load",
                    "exit code", "no models loaded")
 
 
-def _usage_details(response) -> dict:
-    um = getattr(response, "usage_metadata", None) or {}
-    usage = {}
-    input_tokens = um.get("input_tokens")
-    output_tokens = um.get("output_tokens")
-    total_tokens = um.get("total_tokens")
-    if isinstance(input_tokens, int):
-        usage["input"] = input_tokens
-    if isinstance(output_tokens, int):
-        usage["output"] = output_tokens
-    if isinstance(total_tokens, int):
-        usage["total"] = total_tokens
-    elif "input" in usage or "output" in usage:
-        usage["total"] = usage.get("input", 0) + usage.get("output", 0)
-    return usage
-
-
 def _record_llm_observation(response, model: str) -> None:
+    """Annotate the agent-llm span with which endpoint actually answered.
+
+    Model / token usage / output are deliberately NOT set here anymore:
+    the Langfuse LangChain callback records the nested ChatOpenAI
+    generation with real usage, and duplicating it on this span
+    double-counted every token in the dashboards (fixed 2026-07-15).
+    This span only exists to expose the retry/fallback chain.
+    """
     if not _LF_ON or _lf_ctx is None:
         return
-    usage_details = _usage_details(response)
-    usage = ({**usage_details, "unit": "TOKENS"} if usage_details else None)
     try:
         _lf_ctx.update_current_observation(
             name="agent-llm",
-            model=model,
-            model_parameters={
-                "provider": agent_provider(),
-                "temperature": "0.0",
-                "max_tokens": 2048,
-            },
-            usage=usage,
-            usage_details=usage_details or None,
             metadata={
                 "active_model": model,
                 "provider": agent_provider(),
             },
-            output=getattr(response, "content", None),
         )
     except Exception as e:
         print(f"[agent] Langfuse observation update failed: {type(e).__name__}: {e}")
 
 
-@_observe(name="agent-llm", as_type="generation",
-          capture_input=False, capture_output=False)
+@_observe(name="agent-llm", capture_input=False, capture_output=False)
 def _invoke_resilient(bound, messages):
     """Primary → (retry on reload) → fallback endpoint → LLMUnavailable.
 
@@ -420,6 +416,23 @@ def policy_node(state: AgentState) -> dict:
     return {"denied_ids": denied_ids}
 
 
+# A tool result goes into the context verbatim and is replayed on every
+# later turn of the chat. Most are 1-6k chars, but list_ha_entities takes a
+# model-chosen `limit` and could return the whole HA state dump — one such
+# call would overflow the model's context for the rest of the thread.
+MAX_TOOL_RESULT_CHARS = int(os.getenv("AGENT_MAX_TOOL_RESULT_CHARS", "24000"))
+
+
+def _cap_tool_result(text: str) -> str:
+    if len(text) <= MAX_TOOL_RESULT_CHARS:
+        return text
+    cut = len(text) - MAX_TOOL_RESULT_CHARS
+    return (text[:MAX_TOOL_RESULT_CHARS]
+            + f"\n…[truncated: {cut} of {len(text)} chars dropped — call the "
+              f"tool again with a narrower scope (one device/domain, a smaller "
+              f"limit)]")
+
+
 def gated_tool_node(state: AgentState) -> dict:
     """Replacement for prebuilt ToolNode that respects state['denied_ids'].
 
@@ -451,7 +464,7 @@ def gated_tool_node(state: AgentState) -> dict:
         except Exception as e:
             result = {"error": f"{type(e).__name__}: {e}"}
         out_messages.append(ToolMessage(
-            content=str(result),
+            content=_cap_tool_result(str(result)),
             tool_call_id=tc["id"],
             name=tc["name"],
         ))
@@ -537,15 +550,17 @@ def _langfuse_callbacks() -> list:
     if not _LF_ON or _lf_ctx is None:
         return []
     try:
-        import langchain.callbacks.base  # noqa: F401
-    except Exception:
-        return []
-    try:
         handler = _lf_ctx.get_current_langchain_handler()
     except Exception as e:
+        # Loud on purpose: this failing silently is how we lost every
+        # graph/tool span for three weeks (missing `langchain` import
+        # inside langfuse — now satisfied by langfuse_compat).
         print(f"[agent] Langfuse callback unavailable: {type(e).__name__}: {e}")
         return []
-    return [handler] if handler is not None else []
+    if handler is None:
+        print("[agent] Langfuse callback unavailable: no active trace context")
+        return []
+    return [handler]
 
 
 def _execute(user_msg, thread_id, approval_fn, checkpointer, verbose, reuse=False):

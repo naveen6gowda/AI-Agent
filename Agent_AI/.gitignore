@@ -28,6 +28,9 @@ finance_unparsed.jsonl
 # runtime state directory
 var/
 
+# archived conversation summaries (private chat content — keep off the mirror)
+docs/memory/
+
 # any .env variant except the template
 .env*
 !.env.example

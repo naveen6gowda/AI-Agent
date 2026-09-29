@@ -143,11 +143,16 @@ def sweep_services(criticality: Optional[str] = None,
         r for r in results
         if r["criticality"] == "critical" and r["status"] != "up"
     ]
+    high_down = [
+        r for r in results
+        if r["criticality"] == "high" and r["status"] != "up"
+    ]
 
     return {
         "total": len(results),
         **counts,
         "critical_down": critical_down,
+        "high_down": high_down,
         "results": sorted(results, key=lambda r: (r["criticality"] != "critical",
                                                    r["status"] == "up",
                                                    r["service"])),
@@ -218,6 +223,31 @@ def summarize_sweep(data: Dict[str, Any]) -> str:
 
 
 # ----------------------------------------------------------------------
+# Alerting — once per transition (alert_state.py)
+# ----------------------------------------------------------------------
+# Only these levels page. catalog.yaml: critical = any time, high = waking
+# hours (sent silently at night); medium/lab never page from here.
+ALERT_LEVELS = ("critical", "high")
+# One failed probe can be a blip (a slow web UI, a DNS hiccup). Page only
+# when the endpoint is still down on the next 5-minute run.
+CONFIRM_S = 240
+
+
+def alert_transitions(data: Dict[str, Any]) -> Dict[str, Any]:
+    from alert_state import Finding, notify
+    findings = []
+    for r in data["results"]:
+        if r["status"] == "up" or r["criticality"] not in ALERT_LEVELS:
+            continue
+        why = (f"HTTP {r.get('code')} (expected {r.get('expected')})"
+               if r["status"] == "wrong_code" else r.get("error", r["status"]))
+        findings.append(Finding(key=f"{r['service']}/{r['endpoint']}",
+                                label=f"{r['service']} ({r['endpoint']})",
+                                severity=r["criticality"], detail=why))
+    return notify("reachability", "⚠️ Reachability", findings, confirm_s=CONFIRM_S)
+
+
+# ----------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------
 def _print_table(data: Dict[str, Any]) -> None:
@@ -239,12 +269,16 @@ def main() -> int:
     parser.add_argument("--criticality", choices=["critical", "high", "medium", "lab"],
                         help="filter to one criticality level")
     parser.add_argument("--alert", action="store_true",
-                        help="send Telegram alert when any critical endpoint is down")
+                        help="Telegram on down/recovered transitions of critical+high endpoints")
     parser.add_argument("--no-summary", action="store_true",
                         help="skip the helper_llm summary call")
     parser.add_argument("--json", action="store_true",
                         help="emit the raw structured result as JSON only")
     args = parser.parse_args()
+    if args.alert and args.criticality:
+        # alert state covers every endpoint: a filtered sweep would read the
+        # unprobed ones as "recovered"
+        parser.error("--alert cannot be combined with --criticality")
 
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -265,16 +299,13 @@ def main() -> int:
         print("\n--- LLM digest ---")
         print(summarize_sweep(data))
 
-    if args.alert and data.get("critical_down"):
-        from tools import send_telegram_alert
-        names = ", ".join({r["service"] for r in data["critical_down"]})
-        msg = (f"⚠️ Reachability: CRITICAL services unreachable — {names}\n\n"
-               f"{summarize_sweep(data)}")
-        result = send_telegram_alert(msg)
-        print(f"\nAlert sent: {result}")
+    if args.alert:
+        res = alert_transitions(data)
+        print(f"\nalerting: {res}")
 
-    # Exit code: 0 healthy, 2 critical down (useful for cron/systemd).
-    return 2 if data.get("critical_down") else 0
+    # Exit code: 0 healthy, 2 = a critical/high endpoint is down (its
+    # transition was alerted; units declare SuccessExitStatus=2).
+    return 2 if (data.get("critical_down") or data.get("high_down")) else 0
 
 
 if __name__ == "__main__":

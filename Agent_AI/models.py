@@ -54,6 +54,9 @@ _MAX_RETRIES = int(os.getenv("MLX_MAX_RETRIES", "2"))
 # before any answer, so a tiny helper budget yields EMPTY content. Floor the
 # helper cap so the answer survives the reasoning. max_tokens is only a cap —
 # non-reasoning models still stop early, so this never wastes generation.
+# (Since 2026-07-23 helper_llm also disables thinking outright via
+# reasoning_effort="none"; the floor stays as belt-and-braces for models
+# that ignore that field.)
 _HELPER_MIN_TOKENS = int(os.getenv("MLX_HELPER_MIN_TOKENS", "0"))
 
 # The operator picks the active model at runtime via the Telegram /model
@@ -78,9 +81,14 @@ def get_active_model() -> str:
 
 
 def set_active_model(model_id: str) -> None:
-    """Persist the operator's /model choice. Used by the Telegram bot."""
-    with open(_ACTIVE_MODEL_FILE, "w") as f:
+    """Persist the operator's /model choice. Used by the Telegram bot.
+
+    Atomic (write + rename): every monitor reads this file on each run, and
+    a reader catching it half-written would fall back to MLX_MODEL."""
+    tmp = f"{_ACTIVE_MODEL_FILE}.tmp"
+    with open(tmp, "w") as f:
         f.write(model_id.strip())
+    os.replace(tmp, _ACTIVE_MODEL_FILE)
 
 
 def list_models() -> list:
@@ -136,7 +144,8 @@ def probe_model(model_id: str, timeout: float = 180.0):
     return None
 
 
-def _mlx(temperature: float, max_tokens: int, timeout: float, model=None):
+def _mlx(temperature: float, max_tokens: int, timeout: float, model=None,
+         reasoning_effort: str | None = None):
     """Build a ChatOpenAI client pointed at the active local model."""
     return ChatOpenAI(
         base_url=_MLX_BASE_URL,
@@ -146,13 +155,28 @@ def _mlx(temperature: float, max_tokens: int, timeout: float, model=None):
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=_MAX_RETRIES,
+        reasoning_effort=reasoning_effort,
     )
 
 
 # -------------------------------------------------------------------
 # Public factory functions
 # -------------------------------------------------------------------
-def agent_llm(max_tokens: int = 2048, model=None):
+# The agent path needs the same thinking-off switch the helpers got in
+# 2026-07-23 — it was never applied here, and that cost 7 of 12 eval cases.
+# Measured 2026-09-01 on qwen3.5-9b, final-answer turn after a tool result:
+#   reasoning on  -> finish=tool_calls, content="" (it re-calls the tool), or
+#                    finish=stop with the whole answer in `reasoning_content`,
+#                    which langchain-openai drops -> AIMessage.content == ""
+#   reasoning off -> finish=stop, 599 chars of real answer, and the FIRST turn
+#                    still selects check_backups correctly, so tool-calling is
+#                    unaffected.
+# Set MLX_AGENT_REASONING to an effort level (or empty to let the model
+# decide) if a future model needs its thinking back — then re-run evals/.
+_AGENT_REASONING = os.getenv("MLX_AGENT_REASONING", "none")
+
+
+def agent_llm(max_tokens: int = 2048, model=None, reasoning_effort: str | None = None):
     """The MLX model, configured for multi-tool agent loops.
 
     Use this in any file that calls `.bind_tools(...)` or runs a ReAct loop.
@@ -162,9 +186,13 @@ def agent_llm(max_tokens: int = 2048, model=None):
             usually small — big answers come from chaining, not one mega-call.
         model: optional override of MLX_MODEL (rarely needed now that there
             is a single served model).
+        reasoning_effort: override the MLX_AGENT_REASONING default. "none"
+            disables thinking so the answer lands in `content`.
     """
+    effort = _AGENT_REASONING if reasoning_effort is None else reasoning_effort
     return _mlx(temperature=0.0, max_tokens=max_tokens,
-                timeout=_AGENT_TIMEOUT, model=model)
+                timeout=_AGENT_TIMEOUT, model=model,
+                reasoning_effort=effort or None)
 
 
 def agent_provider() -> str:
@@ -174,6 +202,46 @@ def agent_provider() -> str:
     breakpoints) off — a local OpenAI-compatible server doesn't understand them.
     """
     return "mlx"
+
+
+# Cache ONE handler per process: every CallbackHandler owns a background
+# flush thread, and the bot calls helper_llm() repeatedly.
+_HELPER_TRACING: dict = {"handler": None, "tried": False}
+
+
+def _helper_tracing_callbacks() -> list:
+    """Langfuse callback for helper calls, so monitor digests show up too.
+
+    Returns [] when Langfuse isn't configured, when the integration is
+    broken, or when we're already inside an agent trace (the agent's own
+    handler captures nested calls — attaching a second one would create
+    a duplicate standalone trace).
+    """
+    if not (os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")):
+        return []
+    try:
+        # isort: off
+        import langfuse_compat  # noqa: F401  (must precede langfuse.callback)
+        from langfuse.decorators import langfuse_context
+        # isort: on
+        if langfuse_context.get_current_trace_id() is not None:
+            return []
+        if not _HELPER_TRACING["tried"]:
+            _HELPER_TRACING["tried"] = True
+            from pathlib import Path
+
+            import __main__
+            script = Path(getattr(__main__, "__file__", "") or "interactive").stem
+            from langfuse.callback import CallbackHandler
+            _HELPER_TRACING["handler"] = CallbackHandler(
+                trace_name=f"helper:{script}",
+                tags=["helper", script],
+            )
+    except Exception as e:
+        print(f"[models] Langfuse helper tracing unavailable: {type(e).__name__}: {e}")
+        return []
+    h = _HELPER_TRACING["handler"]
+    return [h] if h is not None else []
 
 
 def helper_llm(temperature: float = 0.0, max_tokens: int = 512):
@@ -188,9 +256,19 @@ def helper_llm(temperature: float = 0.0, max_tokens: int = 512):
             0.3–0.7 for some variety. Default 0 — most helpers want consistency.
         max_tokens: response cap. Helpers should be short.
     """
-    return _mlx(temperature=temperature,
-                max_tokens=max(max_tokens, _HELPER_MIN_TOKENS),
-                timeout=_HELPER_TIMEOUT)
+    # Helpers want the answer, not the thinking: without this, qwen3.6
+    # models burn the whole token budget in reasoning_content and return
+    # EMPTY content (callers then see "[helper_llm returned empty]").
+    # Verified A/B 2026-07-23: default -> 768 reasoning tokens + empty
+    # content (finish=length); "none" -> clean one-sentence answer in 5 s.
+    llm = _mlx(temperature=temperature,
+               max_tokens=max(max_tokens, _HELPER_MIN_TOKENS),
+               timeout=_HELPER_TIMEOUT,
+               reasoning_effort="none")
+    callbacks = _helper_tracing_callbacks()
+    if callbacks:
+        llm = llm.with_config({"callbacks": callbacks})
+    return llm
 
 
 # -------------------------------------------------------------------

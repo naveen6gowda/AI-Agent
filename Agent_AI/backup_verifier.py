@@ -34,17 +34,18 @@ from tools import _proxmox_get
 # ----------------------------------------------------------------------
 # Storage queries
 # ----------------------------------------------------------------------
-def _list_storage_backups(node: str, storage: str) -> List[Dict[str, Any]]:
-    """List every backup entry in a storage. Returns [] on any error."""
+def _list_storage_backups(node: str, storage: str) -> Optional[List[Dict[str, Any]]]:
+    """List every backup entry in a storage. None when the storage can't be
+    read — which is NOT the same as "no backups": treating it as an empty
+    list used to report every guest's backup as missing."""
     resp = _proxmox_get(f"/nodes/{node}/storage/{storage}/content?content=backup")
     if "error" in resp:
-        # Bubble up as an empty list — caller will mark the verification
-        # as "missing" rather than crashing the whole sweep.
-        return []
+        return None
     return resp.get("data", []) or []
 
 
-def _backups_by_vmid(node: str, storages: List[str]) -> Dict[int, List[Dict]]:
+def _backups_by_vmid(node: str, storages: List[str],
+                     unreadable: Optional[List[str]] = None) -> Dict[int, List[Dict]]:
     """Aggregate backups across multiple storages, keyed by vmid.
 
     Same vmid backed up to two different storages? Both kept in the list;
@@ -52,7 +53,12 @@ def _backups_by_vmid(node: str, storages: List[str]) -> Dict[int, List[Dict]]:
     """
     by_vmid: Dict[int, List[Dict]] = {}
     for storage in storages:
-        for entry in _list_storage_backups(node, storage):
+        entries = _list_storage_backups(node, storage)
+        if entries is None:
+            if unreadable is not None:
+                unreadable.append(storage)
+            continue
+        for entry in entries:
             vmid = entry.get("vmid")
             if vmid is None:
                 continue
@@ -115,7 +121,13 @@ def verify_backups() -> Dict[str, Any]:
         return {"total": 0, "results": [],
                 "note": "no backup_storage in catalog.proxmox_host"}
 
-    by_vmid = _backups_by_vmid(node, storages)
+    unreadable: List[str] = []
+    by_vmid = _backups_by_vmid(node, storages, unreadable)
+    if len(unreadable) == len(storages):
+        return {"error": f"could not read backup storage {', '.join(unreadable)} "
+                         f"from Proxmox — backup freshness is unknown",
+                "total": 0, "results": [], "critical_problems": [], "problems": [],
+                "storages_checked": storages, "node": node}
     now = time.time()
 
     results: List[Dict[str, Any]] = []
@@ -132,11 +144,20 @@ def verify_backups() -> Dict[str, Any]:
         r for r in results
         if r["criticality"] == "critical" and r["status"] in ("stale", "missing")
     ]
+    # What pages: critical AND high (catalog: high = alert in waking hours;
+    # the check runs at 09:00). Debian13 holds Vaultwarden and Immich and is
+    # "high" — its stale backup used to never reach the operator.
+    problems = [
+        r for r in results
+        if r["criticality"] in ("critical", "high") and r["status"] in ("stale", "missing")
+    ]
 
     return {
         "total": len(results),
         **counts,
         "critical_problems": critical_problems,
+        "problems": problems,
+        "storages_unreadable": unreadable,
         "storages_checked": storages,
         "node": node,
         # Sort: problems first, then by criticality desc, then by name.
@@ -223,7 +244,7 @@ def _print_table(data: Dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="HomelabSentinel backup verifier")
     parser.add_argument("--alert", action="store_true",
-                        help="Telegram alert if any critical service is stale/missing")
+                        help="Telegram alert if any critical/high service is stale/missing")
     parser.add_argument("--no-summary", action="store_true",
                         help="skip helper_llm digest")
     parser.add_argument("--json", action="store_true",
@@ -236,7 +257,13 @@ def main() -> int:
 
     if args.json:
         print(json.dumps(data, indent=2, default=str))
-        return 2 if data.get("critical_problems") else 0
+        if data.get("error"):
+            return 1
+        return 2 if data.get("problems") else 0
+    if data.get("error"):
+        # The check is blind — exit 1 pages via OnFailure with this line.
+        print(f"ERROR: {data['error']}")
+        return 1
 
     print(f"\nBackup verification — {data['total']} services, "
           f"storages={data.get('storages_checked')}")
@@ -248,16 +275,16 @@ def main() -> int:
         print("\n--- LLM digest ---")
         print(summarize_verification(data))
 
-    if args.alert and data.get("critical_problems"):
+    if args.alert and data.get("problems"):
         from tools import send_telegram_alert
-        names = ", ".join(r["name"] for r in data["critical_problems"])
-        msg = (f"⚠️ Backup verification: CRITICAL services with stale/missing "
-               f"backups — {names}\n\n"
+        names = ", ".join(f"{r['name']} ({r['criticality']}, {r['status']})"
+                          for r in data["problems"])
+        msg = (f"⚠️ Backups behind: {names}\n\n"
                f"{summarize_verification(data)}")
         result = send_telegram_alert(msg)
         print(f"\nAlert sent: {result}")
 
-    return 2 if data.get("critical_problems") else 0
+    return 2 if data.get("problems") else 0
 
 
 if __name__ == "__main__":

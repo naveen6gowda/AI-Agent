@@ -8,6 +8,7 @@ import httpx
 import respx
 
 import docker_tools
+import firefly_client
 import tools
 
 # ── Proxmox ─────────────────────────────────────────────────────────
@@ -108,3 +109,87 @@ def test_portainer_auth_failure_is_an_error_dict():
     ).mock(return_value=httpx.Response(401))
     out = docker_tools.list_containers()
     assert "error" in out and "auth" in out["error"].lower()
+
+
+# ── Firefly III ─────────────────────────────────────────────────────
+
+
+_COLLECTED_TXN = {
+    "kind": "direct_debit_collected", "direction": "withdrawal",
+    "amount": "81.00", "currency": "EUR",
+    "merchant": "VATTENFALL EUROPE SALES",
+    "description": "VATTENFALL EUROPE SALES",
+    "date": "2026-07-06T17:14:26+02:00",
+    "external_id": "n26-test-collected", "notes": "test",
+    "tags": ["collected"],
+}
+
+
+def _mock_external_id_search(found=False):
+    respx.get(
+        f"{firefly_client._URL}/api/v1/search/transactions",
+        params={"query": 'external_id_is:"n26-test-collected"'},
+    ).mock(return_value=httpx.Response(
+        200, json={"data": [{"id": "440"}] if found else []}))
+
+
+def _mock_scheduled_search(data):
+    respx.get(
+        f"{firefly_client._URL}/api/v1/search/transactions",
+        params={"query": 'tag_is:scheduled amount_is:"81.00"'},
+    ).mock(return_value=httpx.Response(200, json={"data": data}))
+
+
+@respx.mock
+def test_collected_debit_pairs_with_scheduled_twin():
+    """The 'has been collected' text must NOT double-book a direct debit we
+    already stored from its 'will be debited on <date>' advance notice."""
+    _mock_external_id_search()
+    _mock_scheduled_search([{
+        "id": "440",
+        "attributes": {"transactions": [{
+            "amount": "81.000000000000",
+            "destination_name": "VATTENFALL EUROPE SALES",
+            "date": "2026-07-06T00:00:00+02:00",
+            "tags": ["sentinel", "scheduled"],
+        }]},
+    }])
+    # no POST route mocked: an insert attempt would fail the test loudly
+    out = firefly_client.create_transaction(_COLLECTED_TXN)
+    assert out["result"] == "duplicate_of_scheduled"
+    assert out["firefly_id"] == "440"
+
+
+@respx.mock
+def test_collected_debit_without_notice_is_stored():
+    _mock_external_id_search()
+    _mock_scheduled_search([])   # no advance notice booked
+    respx.get(f"{firefly_client._URL}/api/v1/accounts").mock(
+        return_value=httpx.Response(200, json={"data": [
+            {"id": "7", "attributes": {"name": "N26"}}]}))
+    post = respx.post(f"{firefly_client._URL}/api/v1/transactions").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "999"}}))
+    out = firefly_client.create_transaction(_COLLECTED_TXN)
+    assert out["result"] == "stored" and out["firefly_id"] == "999"
+    assert post.called
+
+
+@respx.mock
+def test_scheduled_match_ignores_other_merchants():
+    _mock_external_id_search()
+    _mock_scheduled_search([{
+        "id": "555",
+        "attributes": {"transactions": [{
+            "amount": "81.000000000000",
+            "destination_name": "SOMEONE ELSE ENTIRELY",
+            "date": "2026-07-06T00:00:00+02:00",
+            "tags": ["sentinel", "scheduled"],
+        }]},
+    }])
+    respx.get(f"{firefly_client._URL}/api/v1/accounts").mock(
+        return_value=httpx.Response(200, json={"data": [
+            {"id": "7", "attributes": {"name": "N26"}}]}))
+    respx.post(f"{firefly_client._URL}/api/v1/transactions").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "1000"}}))
+    out = firefly_client.create_transaction(_COLLECTED_TXN)
+    assert out["result"] == "stored"

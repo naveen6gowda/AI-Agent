@@ -30,7 +30,7 @@
 The agent was built in **five explicit versions** (archived in [`Agent_AI/legacy/`](Agent_AI/legacy/)): the same task solved five times, each adding one production concern — the raw ReAct loop, a framework, an editable graph, observability, and finally a human-in-the-loop safety gate. Read them in order and you’ve learned how to build agents.
 
 > [!TIP]
-> **New here?** [`sentinel-learning-guide.md`](Agent_AI/sentinel-learning-guide.md) is a file-by-file teaching guide to the whole system.
+> **New here?** [`sentinel-flow-guide.md`](Agent_AI/sentinel-flow-guide.md) walks one message through the whole system; [`sentinel-learning-guide.md`](Agent_AI/sentinel-learning-guide.md) is a file-by-file teaching guide.
 > **How it got here:** [`docs/ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md) is the architecture review whose roadmap — tool registry → MCP server → eval harness — is fully shipped.
 
 <a id="demo"></a>
@@ -67,7 +67,7 @@ https://github.com/user-attachments/assets/61a1c8c4-5873-426c-a629-a09e716ecd6f
   <tr>
     <td width="50%" valign="top">
       <h4>🧪 Measured, not assumed</h4>
-      pytest + ruff in GitHub Actions, plus <b>12 golden scenarios</b> that run the real graph against the live model (<a href="Agent_AI/evals/"><code>evals/</code></a>). Known failures are recorded as <code>known_fail</code>, not hidden.
+      <b>125 tests</b> (pytest + ruff) in GitHub Actions, plus <b>16 golden scenarios</b> that run the real graph against the live model (<a href="Agent_AI/evals/"><code>evals/</code></a>). The one long-standing eval “failure” was root-caused to a stale test, not the model.
     </td>
     <td width="50%" valign="top">
       <h4>🚨 The watcher is watched</h4>
@@ -209,7 +209,7 @@ Each version (archived in [`Agent_AI/legacy/`](Agent_AI/legacy/)) solves the sam
 
 ## 📡 Scheduled monitors
 
-Systemd timers run headless, summarize on the local model, and message Telegram **only when something is wrong**:
+Systemd timers run headless, summarize on the local model, and message Telegram **only when something changes** — one DOWN, one RECOVERED, a reminder every 6 h ([`alert_state.py`](Agent_AI/alert_state.py)):
 
 | Monitor | Cadence | Checks |
 |---|---|---|
@@ -221,6 +221,9 @@ Systemd timers run headless, summarize on the local model, and message Telegram 
 | `maintenance` | nightly 03:30 | Checkpoint-DB retention: prune idle threads, cap history, VACUUM |
 | `backups` | daily 09:00 | Backup freshness vs each service’s `max_backup_age_h` |
 | `energy` | daily 21:00 | Reset-aware energy digest + tariff cost |
+| `esphome` | every 2 min | ESPHome nodes online/offline through Home Assistant, with an OTA grace period |
+| `guests` | every 15 min | Every Proxmox VM/LXC: running? real memory use? |
+| `gitmirror` | nightly 04:15 | Commit → `ruff` → `pytest` → push; a red check pages instead of pushing |
 
 Each monitor exposes the **same function three ways** — an agent `@tool`, a CLI (`python reachability.py --alert`), and a timer job — with a deterministic fallback so a monitor **never goes silent** when the LLM is down.
 
@@ -243,19 +246,20 @@ A demo agent and an agent that pages you at 3 a.m. are different products. These
 
 | | Observed | Change |
 |:--:|---|---|
-| 🧪 | Policy-gate tests found a default-allow hole: a malformed resume payload let a destructive call run | Only explicitly approved tool-call IDs execute ([`tests/test_policy_gate.py`](Agent_AI/tests/test_policy_gate.py)) |
-| 🩺 | Raw “unit failed” pages were unreadable; a finding looked the same as a broken check | Exit code 1 = the check broke, 2 = it found something; plain-English pages with filtered log lines |
-| 🙋 | A stopped container was reported, but nothing offered a fix | *Restart / Leave it* card from the Docker monitor — default deny, cooldowns, max three cards per run |
-| 🧠 | Helper summaries came back empty: a reasoning model spent its budget thinking | Reasoning disabled for helper calls — 82.5 s (empty) → 5.3 s |
-| 🔇 | Tool spans vanished from traces; an import guard hid an SDK / LangChain 1.x break | Compatibility shim + end-to-end trace check |
-| 🚦 | A hot-fix reached the mirror unlinted and turned CI red | The sync job runs ruff and pytest before it pushes |
-| 📋 | One-shot init containers that exit cleanly paged on every run | Explicit `expected_down` allowlist — not an exit-code heuristic, since a stopped service also exits 0 |
-| 🔔 | The same alert repeated on every run | Transition paging: one DOWN, one RECOVERED, a 6-hour reminder, quiet hours for non-critical |
-| 📡 | ESP32 devices could drop off unnoticed | ESPHome online/offline watch through Home Assistant, with a grace period for OTA reboots |
-| ⛔ | A “never restart” policy was only advisory | `restart_policy: never` enforced in code, even after an approval |
+| 🧪 | Policy-gate tests found a default-allow hole: a malformed resume payload let a destructive call run | Only explicitly approved tool-call IDs execute — [`test_policy_gate.py`](Agent_AI/tests/test_policy_gate.py) |
+| 🩺 | Raw “unit failed” pages were unreadable; a finding looked the same as a broken check | Exit code 1 = the check broke, 2 = it found something; plain-English pages — [`failure_alert.py`](Agent_AI/failure_alert.py) |
+| 🙋 | A stopped container was reported, but nothing offered a fix | *Restart / Leave it* card from the Docker monitor — default deny, cooldowns, max three cards per run — [`docker_tools.py`](Agent_AI/docker_tools.py) |
+| 🧠 | Helper summaries came back empty: a reasoning model spent its budget thinking | Reasoning disabled for helper calls — 82.5 s (empty) → 5.3 s — [`models.py`](Agent_AI/models.py) |
+| 🔇 | Tool spans vanished from traces; an import guard hid an SDK / LangChain 1.x break | Compatibility shim + end-to-end trace check — [`langfuse_compat.py`](Agent_AI/langfuse_compat.py) |
+| 🚦 | A hot-fix reached the mirror unlinted and turned CI red | The nightly sync runs ruff and pytest before it pushes — [`git_mirror.sh`](Agent_AI/git_mirror.sh) |
+| 📋 | One-shot init containers that exit cleanly paged on every run | Explicit `expected_down` allowlist, not an exit-code heuristic — a stopped service also exits 0 — [`test_docker_ignore.py`](Agent_AI/tests/test_docker_ignore.py) |
+| 🔔 | The same alert repeated on every run | Transition paging: one DOWN, one RECOVERED, a 6-hour reminder, quiet hours for non-critical — [`alert_state.py`](Agent_AI/alert_state.py) |
+| 📡 | ESP32 devices could drop off unnoticed | ESPHome online/offline watch through Home Assistant, with a grace period for OTA reboots — [`esphome_monitor.py`](Agent_AI/esphome_monitor.py) |
+| 🖥️ | Nothing watched VM/LXC state | Guest monitor: every VM/LXC, running state and real memory — [`guest_monitor.py`](Agent_AI/guest_monitor.py) |
+| ⛔ | A “never restart” policy was only advisory | `restart_policy: never` enforced in code, even after an approval — [`test_alerting.py`](Agent_AI/tests/test_alerting.py) |
 
 > [!NOTE]
-> This repository is a **sanitized mirror** of the live system (private IPs → `*.lan`, credentials → placeholders). The first row ships in this snapshot; the later changes run in the live deployment — now **32 tools and 129 tests** — and arrive here with the next sanitized sync.
+> This repository is a **sanitized mirror** of the live system (private IPs → `*.lan`, names and credentials → placeholders). Everything above ships here: **32 tools and 125 tests**, green in CI. The review behind these changes is §6 of [`ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md).
 
 ## 🗂️ Project layout
 
@@ -266,7 +270,7 @@ AI-Agent/
 └── Agent_AI/                 ← the agent (full source)
     ├── README.md             ← module map + run guide
     ├── agent_v5_approval.py  ← the production brain (graph + gate)
-    ├── registry.py           ← all 29 @tool definitions, one catalog
+    ├── registry.py           ← all 32 @tool definitions, one catalog
     ├── mcp_server.py         ← MCP over streamable HTTP, server-side gate
     ├── legacy/               ← the 5-lesson course (v1 → v4 archive)
     ├── sentinel_bot.py       ← Telegram bot (long-running)
@@ -278,12 +282,15 @@ AI-Agent/
     ├── reachability.py · smart_monitor.py · speedtest_monitor.py
     ├── backup_verifier.py · docker_tools.py · db_train_monitor.py
     ├── presence_assistant.py · energy_assistant.py
-    ├── checkpoint_maintenance.py · failure_alert.py   ← reliability jobs
+    ├── esphome_monitor.py · guest_monitor.py
+    ├── alert_state.py        ← transition paging: DOWN / RECOVERED / reminder
+    ├── checkpoint_maintenance.py · failure_alert.py · git_mirror.sh   ← reliability jobs
+    ├── langfuse_compat.py    ← keeps Langfuse tracing working on LangChain 1.x
     ├── rag.py                ← BM25 local RAG over docs/
     ├── evals/                ← golden scenarios + runner (live model)
     ├── tests/                ← pytest: policy gate, clients, MCP, evals
     ├── docs/                 ← runbook · services · voice setup · ARCHITECTURE.md
-    ├── systemd/              ← 4 services + 8 timers + OnFailure alert template
+    ├── systemd/              ← 4 services + 11 timers + OnFailure alert template
     ├── .env.example          ← config template (copy → .env)
     └── catalog.example.yaml  ← inventory template (copy → catalog.yaml)
 ```

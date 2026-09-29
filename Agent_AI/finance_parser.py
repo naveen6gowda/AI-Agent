@@ -11,6 +11,7 @@ Recognized formats (all real N26 English notification texts):
     "Your payment of €6.99 will be debited on 25 Oct 2025"
     "Your payment of €79.00 to Test Store A has been successfully processed"
     "€14.28 was debited from your account to pay klarmobil GmbH"
+    "Your direct debit payment of €81.00 has been collected by VATTENFALL…"
     "You received a MoneyBeam for €286,00 from mani"          → deposit
     "You received €100.00 from John Doe"                      → deposit
     "You sent a MoneyBeam of €20.00 to Jane"
@@ -28,16 +29,26 @@ instead of the default (N26).
 Anything else returns {"parsed": False, "reason": ...} — the server logs it
 to finance_unparsed.jsonl so no capture is silently lost.
 
-Dedupe: external_id = sha256 of the normalized text + the notification's
-post_time (when HA sends it) or the transaction date (fallback). Same
-notification re-delivered → same external_id → firefly_client skips it.
-Caveat (fallback path only): two genuinely identical purchases on the same
-day would collide — always send post_time from HA.
+Dedupe: external_id = sha256 of the normalized text + a discriminator.
+Which discriminator depends on who initiated the transaction:
 
-Double-count caveat: a "will be debited on <date>" advance notice is stored
-dated <date> and tagged "scheduled". If N26 later also notifies when the
-debit executes, that second text parses differently and would insert again —
-delete one in Firefly if you see a pair (watch the "scheduled" tag).
+  * card_payment / wallet_payment (user-initiated): the notification's
+    post_time. Tapping the same shop for the same amount twice in one day
+    is real — both must be stored.
+  * everything else (bank-initiated: deposits, MoneyBeams, direct debits):
+    the transaction DATE only. Phones re-deliver these notifications with a
+    fresh post_time (seen live 2026-07-09: one €92.40 transfer_in booked
+    twice 72 min apart) and identical same-day repeats are implausible, so
+    content+date is the safer key. Caveat: a genuinely repeated identical
+    bank transfer on the same day would be skipped as a duplicate — the
+    audit log ("result": "duplicate") is the trail if that ever happens.
+
+Scheduled-vs-collected: a "will be debited on <date>" advance notice is
+stored dated <date> and tagged "scheduled". When the matching "has been
+collected by" text arrives later, firefly_client looks for that scheduled
+twin (same amount + counterparty within ±7 days) and skips the insert as
+"duplicate_of_scheduled" — a collected debit WITHOUT a prior notice is
+stored normally, tagged "collected".
 
 Self-test (no network, no Firefly writes):
     uv run python finance_parser.py --selftest
@@ -71,6 +82,8 @@ _PATTERNS = [
         rf"payment of {_AMT} to (?P<who>.+?) (?:has been|was) successfully processed", re.I)),
     ("direct_debit", "withdrawal", re.compile(
         rf"{_AMT} (?:has been|was) debited from your account to pay (?P<who>.+?)\.?$", re.I)),
+    ("direct_debit_collected", "withdrawal", re.compile(
+        rf"direct debit payment of {_AMT} (?:has been|was) collected by (?P<who>.+?)\.?$", re.I)),
     ("moneybeam_in", "deposit", re.compile(
         rf"received a MoneyBeam (?:of|for) {_AMT} from (?P<who>.+?)\.?$", re.I)),
     ("transfer_in", "deposit", re.compile(
@@ -85,6 +98,12 @@ _PATTERNS = [
     ("wallet_payment", "withdrawal", re.compile(
         rf"^(?P<who>.+?)\s+{_AMT_NUM}\s*€$")),
 ]
+
+# Kinds whose external_id keeps the notification post_time (see the module
+# docstring's dedupe section): user-initiated payments where the same text
+# can legitimately repeat within one day. Bank-initiated kinds dedupe on
+# content+date so a re-delivered notification can't double-book.
+_POSTED_ID_KINDS = {"card_payment", "wallet_payment"}
 
 
 def _norm_amount(raw: str) -> str:
@@ -134,7 +153,10 @@ def parse(text: str, posted: Optional[str] = None,
     Returns {"parsed": False, "reason": ..., "raw": ...} when unrecognized.
     """
     raw = " ".join((text or "").split())
-    if not raw:
+    # HA automations sometimes forward a cleared notification sensor as the
+    # literal string "null" — treat it like an empty message, not a format
+    # we failed to recognize.
+    if not raw or raw.lower() in ("null", "none"):
         return {"parsed": False, "reason": "empty_message", "raw": text}
     if "€" not in raw:
         return {"parsed": False, "reason": "no_eur_amount", "raw": raw}
@@ -148,6 +170,7 @@ def parse(text: str, posted: Optional[str] = None,
         who = (groups.get("who") or "").strip() or None
 
         scheduled = kind == "scheduled_debit"
+        collected = kind == "direct_debit_collected"
         wallet = kind == "wallet_payment"
         when = _parse_date(groups["date"]) if groups.get("date") else None
         if when is None:
@@ -155,6 +178,9 @@ def parse(text: str, posted: Optional[str] = None,
         date_iso = when.isoformat(timespec="seconds")
 
         source = "Samsung Wallet" if wallet else "N26"
+        tags = (["scheduled"] if scheduled
+                else ["collected"] if collected
+                else ["wallet"] if wallet else [])
         out = {
             "parsed": True,
             "kind": kind,
@@ -166,13 +192,15 @@ def parse(text: str, posted: Optional[str] = None,
             "description": who or kind.replace("_", " "),
             "date": date_iso,
             "external_id": make_external_id(
-                raw, posted, date_iso[:10],
+                raw, posted if kind in _POSTED_ID_KINDS else None,
+                date_iso[:10],
                 prefix="wallet-" if wallet else "n26-"),
             "notes": f"Captured from {source} notification via HA.\n{raw}",
-            "tags": ["scheduled"] if scheduled else (["wallet"] if wallet else []),
+            "tags": tags,
         }
-        if wallet and (title or "").strip():
-            out["asset_account"] = title.strip()   # book to the card, not N26
+        clean_title = (title or "").strip()
+        if wallet and clean_title and clean_title.lower() not in ("null", "none"):
+            out["asset_account"] = clean_title   # book to the card, not N26
         return out
 
     return {"parsed": False, "reason": "unrecognized_format", "raw": raw}
@@ -193,10 +221,12 @@ _SAMPLES = [
      True, "deposit", "286.00", "mani"),
     ("€14.28 was debited from your account to pay klarmobil GmbH",
      True, "withdrawal", "14.28", "klarmobil GmbH"),
+    ("Your direct debit payment of €81.00 has been collected by VATTENFALL EUROPE SALES.",
+     True, "withdrawal", "81.00", "VATTENFALL EUROPE SALES"),
     ("You just paid €12.50 to REWE Markt",
      True, "withdrawal", "12.50", "REWE Markt"),
-    ("You received €1.050,00 from Chaitra Kallimani",
-     True, "deposit", "1050.00", "Chaitra Kallimani"),
+    ("You received €1.050,00 from Max Mustermann",
+     True, "deposit", "1050.00", "Max Mustermann"),
     ("You sent a MoneyBeam of €20.00 to Jane",
      True, "withdrawal", "20.00", "Jane"),
     ("Your monthly statement is ready", False, None, None, None),
@@ -254,6 +284,23 @@ def _selftest() -> int:
     dedupe_ok = a["external_id"] == b["external_id"] != c["external_id"]
     print(f"[{'PASS' if dedupe_ok else 'FAIL'}] external_id stable per posted, distinct across posted")
     failures += 0 if dedupe_ok else 1
+
+    # bank-initiated texts must dedupe across RE-DELIVERY (new post_time,
+    # same day) — one €92.40 transfer_in booked twice on 2026-07-09.
+    a = parse("You received €92.40 from BFZ GGMBH", posted="111")
+    b = parse("You received €92.40 from BFZ GGMBH", posted="222")
+    redeliver_ok = a["external_id"] == b["external_id"]
+    print(f"[{'PASS' if redeliver_ok else 'FAIL'}] bank-initiated id ignores post_time (re-delivery safe)")
+    failures += 0 if redeliver_ok else 1
+
+    # literal "null" from a cleared HA sensor is an empty message, and a
+    # "null" title must never become a Firefly asset account
+    r = parse("null", posted="1")
+    null_ok = not r.get("parsed") and r.get("reason") == "empty_message"
+    r2 = parse(_WALLET_SAMPLES[0][0], posted="1", title="null")
+    null_ok = null_ok and r2.get("parsed") and "asset_account" not in r2
+    print(f"[{'PASS' if null_ok else 'FAIL'}] 'null' message/title handled")
+    failures += 0 if null_ok else 1
 
     print(f"\n{'ALL PASS ✅' if failures == 0 else f'{failures} FAILURES ❌'}")
     return 0 if failures == 0 else 1

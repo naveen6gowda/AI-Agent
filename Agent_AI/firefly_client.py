@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -141,6 +142,53 @@ def find_by_external_id(external_id: str) -> Optional[Dict[str, Any]]:
     return data[0] if data else None
 
 
+def find_scheduled_match(amount: Any, merchant: Optional[str],
+                         date_iso: Optional[str],
+                         window_days: int = 7) -> Optional[str]:
+    """The Firefly id of an existing 'scheduled'-tagged withdrawal with the
+    same amount and counterparty within ±window_days, else None.
+
+    Used to pair N26's "has been collected by" notification with the advance
+    "will be debited on <date>" notice we already booked — storing both
+    would double-count the debit. Any lookup failure returns None (fail
+    open: better a visible duplicate in Firefly than a silently dropped
+    transaction)."""
+    try:
+        want_amt = float(amount)
+    except (TypeError, ValueError):
+        return None
+    res = _request("GET", "/api/v1/search/transactions",
+                   params={"query": f'tag_is:scheduled amount_is:"{amount}"'})
+    if "error" in res:
+        return None
+    try:
+        center = datetime.fromisoformat(date_iso) if date_iso else None
+    except ValueError:
+        center = None
+    want_merchant = (merchant or "").strip().lower()
+
+    for t in res.get("data", []):
+        for split in t.get("attributes", {}).get("transactions", []):
+            try:
+                if abs(float(split.get("amount")) - want_amt) > 0.005:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            dest = (split.get("destination_name") or "").strip().lower()
+            if want_merchant and dest and not (
+                    want_merchant in dest or dest in want_merchant):
+                continue
+            if center is not None and split.get("date"):
+                try:
+                    delta = datetime.fromisoformat(split["date"]) - center
+                except ValueError:
+                    delta = None
+                if delta is not None and abs(delta.days) > window_days:
+                    continue
+            return t.get("id")
+    return None
+
+
 def create_transaction(txn: Dict[str, Any]) -> Dict[str, Any]:
     """Insert ONE withdrawal into Firefly. Idempotent: if a transaction with the
     same external_id already exists, returns {"result": "duplicate"} WITHOUT
@@ -157,6 +205,19 @@ def create_transaction(txn: Dict[str, Any]) -> Dict[str, Any]:
     if dup is not None:
         return {"result": "duplicate", "external_id": external_id,
                 "firefly_id": dup.get("id")}
+
+    # N26 sends a "has been collected by" notification for a direct debit it
+    # already announced with a "will be debited on <date>" notice — which we
+    # booked (tagged "scheduled"). Pair them instead of double-counting; a
+    # collected debit with NO prior notice stores normally below.
+    if txn.get("kind") == "direct_debit_collected":
+        sched_id = find_scheduled_match(txn.get("amount"), txn.get("merchant"),
+                                        txn.get("date"))
+        if sched_id is not None:
+            return {"result": "duplicate_of_scheduled",
+                    "external_id": external_id, "firefly_id": sched_id,
+                    "merchant": txn.get("merchant"),
+                    "amount": str(txn.get("amount"))}
 
     # Samsung Wallet payments carry the card's name from the notification
     # title; N26 texts don't set it and fall back to the .env default.

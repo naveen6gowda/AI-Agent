@@ -154,3 +154,43 @@ Each phase is independently shippable and leaves the system running.
 | Ops discipline | systemd fleet, OnFailure alerting, retention jobs, runbooks |
 | Cost engineering | local-first single LLM, zero marginal token cost |
 | Honest tradeoffs | BM25-vs-embeddings decision, single-model constraint |
+
+## 6. Review 2026-09-28 — state after the roadmap
+
+**Verdict unchanged: the four core patterns hold.** Twelve weeks on, the
+graph-with-a-policy-gate, the checkpointer, the single-model factory and the
+declarative catalog have all survived real use without a redesign. What the
+review found was in the layer the roadmap never covered: **how monitors turn
+findings into messages.**
+
+Current shape: 32 tools in one registry (agent + MCP), 4 long-running
+services, 11 timers, a haproxy LLM front door on the LXC (Mac LAN primary,
+Tailscale backup), 125 tests (the public mirror omits one private exporter).
+
+What was wrong, and what changed:
+
+| Finding | Evidence | Change |
+|---------|----------|--------|
+| Monitors alerted on **every run** while a problem lasted | 2026-09-02 outage: a reachability alert every 5 min + 12 "Docker check broke" pages | `alert_state.py`: one message per transition (down / recovered, 6 h reminder); reachability needs 2 failed probes |
+| `high` criticality **never alerted** from reachability or backups, contradicting the catalog's own definition | Debian13 (DNS, Vaultwarden, Immich) and Hermes are `high` | reachability + backups page `high`; silent delivery 23:00–07:00 |
+| Nothing watched **VM/LXC state** — `sentinel-guests` was never installed | a stopped Hermes would have gone unnoticed | timer installed, transition alerts |
+| Portainer unreachable paged as **"monitor broke"** | 09-02 | now a finding about the host ("Debian13 down?"); container incidents are kept, not closed |
+| Unreadable backup storage reported as **"backups missing"** | code path | now an error (check blind → pager) |
+| `restart_policy: never` lived **only in the prompt** | one mistaken tap could reboot OPNSense | enforced inside the restart tools |
+| Tool results were **unbounded** | `list_ha_entities` takes a model-chosen `limit` | capped at 24k chars with a "narrow the query" note |
+| `/reset` **undone nightly** (sessions in memory, bot restarts 03:30) | code path | sessions persisted in `var/` |
+| docs the RAG answers from were **stale** (Claude/Gemma, destroyed VMs) | `docs/operations-runbook.md` | rewritten |
+
+Still open (operator decisions, not bugs):
+
+- **Services run as root** (roadmap weakness #7). Cheap next step:
+  `ProtectSystem=strict` + `ReadWritePaths=/opt/sentinel/var` on the
+  monitor units; a dedicated user needs the Proxmox SSH key and
+  `systemctl` access for maintenance.
+- **Backups live on the host they protect** (`general-storage` on the
+  Proxmox box) — an offsite copy is the one data-loss risk left.
+- **`restart_policy: auto`** is not implemented (everything asks). Fine as
+  long as nobody expects it to work.
+- **A bot restart mid-approval** leaves that tool call unanswered in the
+  thread (never observed in the checkpoint DB; the approval times out
+  normally in every other case).

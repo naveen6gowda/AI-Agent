@@ -193,3 +193,31 @@ def test_mixed_batch_gates_only_destructive(fake_restart, fake_check):
     by_id = {m.tool_call_id: m for m in tool_messages(result)}
     assert "REFUSED" in by_id["c-danger"].content
     assert "REFUSED" not in by_id["c-safe"].content
+
+
+# ── restart_vm is gated exactly like restart_lxc ─────────────────────
+
+
+@pytest.fixture
+def fake_restart_vm(monkeypatch):
+    fake = FakeTool("restart_vm")
+    monkeypatch.setitem(agent._TOOLS_BY_NAME, "restart_vm", fake)
+    return fake
+
+
+def test_restart_vm_is_gated(fake_restart_vm):
+    """Most of this homelab is QEMU — the VM tool must gate like the LXC one."""
+    app = make_app([
+        AIMessage("", tool_calls=[tc("restart_vm", "v1", node="Proxmox", vmid=100)]),
+        AIMessage("done"),
+    ])
+    result = start(app)
+    assert "__interrupt__" in result
+    assert [c["tool_call_id"]
+            for c in result["__interrupt__"][0].value["destructive_calls"]] == ["v1"]
+    assert fake_restart_vm.calls == []
+
+    result = app.invoke(
+        Command(resume=[{"tool_call_id": "v1", "decision": "denied"}]), CFG)
+    assert fake_restart_vm.calls == []
+    assert [m for m in tool_messages(result) if "REFUSED" in m.content]

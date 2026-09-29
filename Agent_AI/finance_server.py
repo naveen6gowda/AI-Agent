@@ -25,10 +25,11 @@ Run:
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -46,8 +47,9 @@ TOKEN = os.getenv("FINANCE_SERVER_TOKEN", "")
 HOST = os.getenv("FINANCE_SERVER_HOST", "0.0.0.0")
 PORT = int(os.getenv("FINANCE_SERVER_PORT", "8098"))
 
-AUDIT_LOG_PATH = Path(__file__).parent / "var" / "audit.log"
-AUDIT_LOG_PATH.parent.mkdir(exist_ok=True)
+AUDIT_LOG_PATH = Path(os.getenv("AUDIT_LOG_PATH",
+                                str(Path(__file__).parent / "var" / "audit.log")))
+AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 UNPARSED_PATH = Path(__file__).parent / "var" / "finance_unparsed.jsonl"
 
 app = FastAPI(title="HomelabSentinel Finance Bridge", version="1.0")
@@ -65,7 +67,7 @@ def _audit(event: str, payload: Dict[str, Any]) -> None:
     """Append one structured line to audit.log. Best-effort — never raises."""
     try:
         line = json.dumps(
-            {"ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              "event": event, **payload},
             default=str,
         )
@@ -78,7 +80,7 @@ def _audit(event: str, payload: Dict[str, Any]) -> None:
 def _log_unparsed(req: TxnReq, reason: str) -> None:
     try:
         line = json.dumps(
-            {"ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              "reason": reason, "title": req.title, "message": req.message,
              "posted": req.posted},
             ensure_ascii=False,
@@ -97,7 +99,7 @@ def _check_auth(authorization: Optional[str], token_q: Optional[str]) -> None:
         supplied = authorization[7:].strip()
     if not supplied:
         supplied = token_q
-    if supplied != TOKEN:
+    if not supplied or not hmac.compare_digest(supplied.encode(), TOKEN.encode()):
         raise HTTPException(status_code=401, detail="invalid or missing token")
 
 

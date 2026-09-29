@@ -33,6 +33,8 @@ from energy_assistant import (
 from energy_assistant import (
     read_energy_summary as _read_energy_summary,
 )
+from esphome_monitor import scan_esphome as _scan_esphome
+from guest_monitor import scan_guests as _scan_guests
 from presence_assistant import (
     check_climate_state as _check_climate_state,
 )
@@ -75,6 +77,9 @@ from tools import (
 )
 from tools import (
     restart_lxc_raw as _restart_lxc_raw,
+)
+from tools import (
+    restart_vm_raw as _restart_vm_raw,
 )
 from tools import (
     send_telegram_alert as _send_telegram_alert,
@@ -177,7 +182,7 @@ def check_reachability(criticality: str = "") -> dict:
 
     Returns a structured digest:
         {total, up, down, wrong_code, auth_missing,
-         critical_down: [...], results: [...]}
+         critical_down: [...], high_down: [...], results: [...]}
 
     For investigation, prefer this over calling get_ha_entity or
     check_proxmox_status one-by-one — one tool call probes everything.
@@ -240,7 +245,9 @@ def check_backups() -> dict:
       - producing a daily / weekly digest
 
     Returns: {total, fresh, stale, missing, skipped,
-              critical_problems: [...], results: [...]}.
+              critical_problems: [...], problems: [...] (critical+high),
+              results: [...]}. An `error` key means the backup storage
+              could not be read — freshness is UNKNOWN, not "missing".
     """
     return _verify_backups()
 
@@ -350,9 +357,81 @@ def list_esphome_sensors(device: str = "", environmental_only: bool = True) -> d
 
 
 @tool
+def check_esphome_devices() -> dict:
+    """Online/offline status of every ESPHome device (the ESP32 boards) —
+    the same ONLINE/OFFLINE the ESPHome dashboard shows, read from Home
+    Assistant.
+
+    Use for "are my ESP devices online?", "is the hall clock connected?",
+    "which sensor nodes are down?". For their READINGS (temperature,
+    humidity, CO2...) use list_esphome_sensors instead.
+
+    Per device: status — online | offline (unavailable in HA longer than
+    grace_s) | dropping (unavailable for less than that: usually an OTA
+    flash or reboot, not a problem yet) | missing (in the catalog, gone from
+    HA) | unknown; monitor — true = Sentinel sends a Telegram message when
+    it goes offline or comes back, false = parked by the operator, no
+    alerts; plus ip, firmware, model and how long it has been unavailable.
+    A parked device's status can be meaningless (read its `note`) — call it
+    parked rather than asserting it is online. `untracked` lists nodes HA
+    has that catalog.yaml doesn't (drift for the operator to add).
+    Read-only; there is no restart tool for ESP devices.
+    """
+    try:
+        return _scan_esphome()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+@tool
+def check_all_guests(deep: bool = True) -> dict:
+    """Health of EVERY Proxmox guest in one call: state, memory, CPU, uptime.
+
+    Use this FIRST for "how are my VMs?", "is anything using too much
+    memory?", "is everything running?" — one call replaces a
+    check_proxmox_status per guest.
+
+    Each guest gets a verdict:
+      ok              running, memory fine
+      stopped         not running (a finding when criticality is critical/high)
+      high_mem        memory >= threshold from a TRUSTWORTHY source
+      mem_unreliable  reading exists but comes from host_balloon or the guest
+                      agent failed — a MONITORING gap, NOT a memory problem.
+                      Never recommend a restart for this; recommend
+                      installing qemu-guest-agent instead.
+      missing         catalogued but no longer on Proxmox (catalog drift)
+      unknown         the check itself failed
+
+    Also returns untracked_guests: guests live on Proxmox that are absent
+    from catalog.yaml (the other direction of drift).
+
+    Args:
+        deep: True (default) reads real memory from inside each running
+            guest. False skips SSH — faster, but QEMU memory is then
+            unreliable for every VM.
+    """
+    return _scan_guests(deep=deep)
+
+
+@tool
 def restart_lxc(node: str, vmid: int) -> dict:
-    """Restart an LXC container. DESTRUCTIVE — gated by operator approval."""
+    """Restart an LXC *container* (kind='lxc'). DESTRUCTIVE — gated by
+    operator approval. For a QEMU VM use restart_vm instead; this refuses a
+    vmid the catalog says is qemu rather than posting to the wrong endpoint."""
     return _restart_lxc_raw(node, vmid)
+
+
+@tool
+def restart_vm(node: str, vmid: int) -> dict:
+    """Restart a QEMU *virtual machine* (kind='qemu') — graceful ACPI reboot.
+    DESTRUCTIVE — gated by operator approval.
+
+    Most of this homelab is QEMU (OPNSense, HomeAssistant, Debian13). Check
+    the catalog's restart_policy first: 'never' means propose an alert, not a
+    restart. Confirm the guest's state with check_all_guests or
+    check_proxmox_status before proposing, and never justify a restart with a
+    mem_pct whose source is 'host_balloon'."""
+    return _restart_vm_raw(node, vmid)
 
 
 @tool
@@ -456,17 +535,19 @@ def next_departures(limit: int = 4) -> dict:
 _TOOLS = [
     get_service_catalog, get_service,
     list_proxmox_nodes, list_proxmox_guests,
-    check_proxmox_status, get_guest_mem_pct,
+    check_proxmox_status, get_guest_mem_pct, check_all_guests,
     check_reachability, check_disk_health, check_backups,
     discover_energy_entities, check_energy,
     discover_home_entities, check_presence_state,
     check_climate_state, check_light_state,
     get_ha_entity, list_ha_entities, list_esphome_sensors,
+    check_esphome_devices,
     search_docs, speak_on_alexa,
     check_commute, next_departures,
     list_docker_containers, check_docker_container,
     check_internet_speed,
-    restart_lxc, restart_docker_container, call_ha_service, send_telegram_alert,
+    restart_lxc, restart_vm, restart_docker_container, call_ha_service,
+    send_telegram_alert,
 ]
 _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 

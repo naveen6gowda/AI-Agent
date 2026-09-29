@@ -1,14 +1,14 @@
 [Unit]
 OnFailure=sentinel-failure-alert@%n.service
-Description=HomelabSentinel reachability sweep
+Description=HomelabSentinel ESPHome device online/offline watch
 After=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/sentinel
 EnvironmentFile=/opt/sentinel/.env
-ExecStart=/root/.local/bin/uv run python reachability.py --alert --no-summary
+ExecStart=/root/.local/bin/uv run python esphome_monitor.py --alert
 StandardOutput=journal
 StandardError=journal
-# exit 2 = "found a problem, already sent its own alert" — not a unit failure
+# exit 2 = a monitored device is offline; it was alerted on its transition — not a unit failure
 SuccessExitStatus=2

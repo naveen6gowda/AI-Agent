@@ -1,0 +1,13 @@
+[Unit]
+OnFailure=sentinel-failure-alert@%n.service
+Description=HomelabSentinel nightly git mirror (commit + push to GitHub)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sentinel
+# git/ssh need HOME for ~/.ssh and ~/.gitconfig when run from systemd
+Environment=HOME=/root
+ExecStart=/opt/sentinel/git_mirror.sh
+StandardOutput=journal
+StandardError=journal

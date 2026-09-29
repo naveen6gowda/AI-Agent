@@ -24,6 +24,7 @@ Run:  uv run python mcp_server.py          (systemd: sentinel-mcp.service)
 """
 
 import contextlib
+import hmac
 import json
 import os
 import time
@@ -45,6 +46,30 @@ from registry import TOOLS, TOOLS_BY_NAME
 from tools import _audit
 
 load_dotenv()
+
+# ── Langfuse tracing (optional; same pattern as the agent) ──────────
+# One trace per MCP tool call, so external clients (Claude Code, Hermes)
+# using this server show up in Langfuse next to the bot's agent traces.
+try:
+    # isort: off
+    import langfuse_compat  # noqa: F401  (must precede langfuse imports)
+    from langfuse.decorators import langfuse_context as _lf_ctx
+    from langfuse.decorators import observe as _observe
+    # isort: on
+    _LF_ON = bool(os.getenv("LANGFUSE_PUBLIC_KEY")
+                  and os.getenv("LANGFUSE_SECRET_KEY"))
+except Exception:
+    _LF_ON = False
+    _lf_ctx = None
+
+    def _observe(*_a, **_k):
+        if _a and len(_a) == 1 and callable(_a[0]) and not _k:
+            return _a[0]
+
+        def _decorate(_fn):
+            return _fn
+        return _decorate
+print("[mcp] Langfuse tracing:", "on" if _LF_ON else "off")
 
 _HERE = Path(__file__).parent
 APPROVALS_DIR = _HERE / "var" / "approvals"
@@ -112,6 +137,7 @@ def request_operator_approval(name: str, arguments: dict) -> str:
 # ── dispatch — the testable core ────────────────────────────────────
 
 
+@_observe(name="mcp-tool", capture_input=False, capture_output=True)
 def dispatch(name: str, arguments: dict, approval_fn=None) -> dict:
     """Execute one tool call under the server-side gate.
 
@@ -120,6 +146,15 @@ def dispatch(name: str, arguments: dict, approval_fn=None) -> dict:
     is a refusal. Read tools run directly. Never raises — errors come
     back as {"error": ...} dicts, like the tools themselves.
     """
+    if _LF_ON and _lf_ctx is not None:
+        try:
+            _lf_ctx.update_current_trace(
+                name=f"mcp:{name}",
+                input={"tool": name, "arguments": arguments},
+                tags=["mcp", name],
+            )
+        except Exception:
+            pass
     tool_fn = TOOLS_BY_NAME.get(name)
     if tool_fn is None:
         return {"error": f"unknown tool: {name}"}
@@ -221,7 +256,7 @@ class BearerAuth:
 
             headers = dict(scope.get("headers") or [])
             auth = headers.get(b"authorization", b"").decode()
-            if auth != f"Bearer {self.token}":
+            if not hmac.compare_digest(auth.encode(), f"Bearer {self.token}".encode()):
                 body = b'{"error":"unauthorized"}'
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"content-type", b"application/json")]})

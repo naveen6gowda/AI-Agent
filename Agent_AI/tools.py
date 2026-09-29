@@ -27,7 +27,7 @@ import os
 import subprocess
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -40,15 +40,18 @@ load_dotenv()
 # -------------------------------------------------------------------
 # Audit log
 # -------------------------------------------------------------------
-AUDIT_LOG_PATH = Path(__file__).parent / "var" / "audit.log"
-AUDIT_LOG_PATH.parent.mkdir(exist_ok=True)
+# Env-overridable so the test suite can point it at a scratch file instead
+# of polluting the production audit trail with synthetic approval events.
+AUDIT_LOG_PATH = Path(os.getenv("AUDIT_LOG_PATH",
+                                str(Path(__file__).parent / "var" / "audit.log")))
+AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _audit(event: str, payload: Dict[str, Any]) -> None:
     """Append one structured line to audit.log. Best-effort — never raises."""
     try:
         line = json.dumps(
-            {"ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              "event": event, **payload},
             default=str,
         )
@@ -661,8 +664,11 @@ def send_telegram_alert(
     message: str,
     parse_mode: Optional[str] = None,
     chat_id: Optional[str] = None,
+    silent: bool = False,
 ) -> dict:
-    """Send a Telegram message via the operator's bot."""
+    """Send a Telegram message via the operator's bot.
+
+    silent=True delivers it without a notification sound (quiet hours)."""
     if not _TG_TOKEN:
         return {"error": "TELEGRAM_BOT_TOKEN not set."}
     target = chat_id or _TG_CHAT_ID
@@ -674,6 +680,8 @@ def send_telegram_alert(
     payload: Dict[str, Any] = {"chat_id": target, "text": message}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if silent:
+        payload["disable_notification"] = True
 
     try:
         r = httpx.post(f"{_TG_BASE}/sendMessage", json=payload, timeout=10.0)
@@ -869,19 +877,68 @@ def request_telegram_approval(
 # This split avoids double-prompting in agents that gate at the graph
 # layer. Pick ONE variant per agent — never mix them on the same call.
 # -------------------------------------------------------------------
+def _kind_guard(vmid: int, want: str) -> Optional[dict]:
+    """Refuse a restart aimed at the wrong guest type.
+
+    Proxmox has separate endpoints for containers and VMs, and posting to
+    the wrong one yields an opaque 500. The catalog already knows which is
+    which, so check first and name the tool the model should have used.
+    Returns None when the kind matches (or is unknown — then we probe).
+    """
+    actual = _kind_from_catalog(vmid)
+    if actual is None or actual == want:
+        return None
+    other = "restart_vm" if actual == "qemu" else "restart_lxc"
+    return {"executed": False, "reason": "wrong_guest_kind",
+            "error": f"vmid {vmid} is a {actual} guest, not {want} — "
+                     f"use {other} instead"}
+
+
+def _restart_guest_raw(node: str, vmid: int, kind: str) -> dict:
+    """POST the Proxmox reboot endpoint for one guest. NO APPROVAL CHECK.
+
+    kind is "lxc" or "qemu"; they are different API paths. Caller is
+    responsible for gating. Audited either way.
+    """
+    node = node or _PROXMOX_DEFAULT_NODE
+    event = "restart_lxc" if kind == "lxc" else "restart_vm"
+    from catalog import restart_forbidden
+    never = restart_forbidden(vmid)
+    if never:
+        err = (f"{never} (vmid {vmid}) has restart_policy 'never' in catalog.yaml — "
+               f"Sentinel does not restart it. Tell the operator to do it by "
+               f"hand in Proxmox if it is really needed.")
+        _audit(f"{event}_refused", {"vmid": vmid, "error": err})
+        return {"executed": False, "reason": "restart_policy_never", "error": err}
+    guard = _kind_guard(vmid, kind)
+    if guard:
+        _audit(f"{event}_failed", {"vmid": vmid, "error": guard["error"]})
+        return guard
+    resp = _proxmox_request("POST", f"/nodes/{node}/{kind}/{vmid}/status/reboot")
+    if "error" in resp:
+        _audit(f"{event}_failed", {"vmid": vmid, "error": resp["error"]})
+        return {"executed": False, "reason": "proxmox_error", **resp}
+    upid = resp.get("data")
+    _audit(f"{event}_executed", {"vmid": vmid, "kind": kind, "upid": upid})
+    return {"executed": True, "vmid": vmid, "kind": kind, "upid": upid}
+
+
 def restart_lxc_raw(node: str, vmid: int) -> dict:
     """Restart an LXC container on Proxmox. NO APPROVAL CHECK.
 
     Caller is responsible for gating. Audited regardless.
     """
-    node = node or _PROXMOX_DEFAULT_NODE
-    resp = _proxmox_request("POST", f"/nodes/{node}/lxc/{vmid}/status/reboot")
-    if "error" in resp:
-        _audit("restart_lxc_failed", {"vmid": vmid, "error": resp["error"]})
-        return {"executed": False, "reason": "proxmox_error", **resp}
-    upid = resp.get("data")
-    _audit("restart_lxc_executed", {"vmid": vmid, "upid": upid})
-    return {"executed": True, "vmid": vmid, "upid": upid}
+    return _restart_guest_raw(node, vmid, "lxc")
+
+
+def restart_vm_raw(node: str, vmid: int) -> dict:
+    """Restart a QEMU VM on Proxmox (graceful ACPI reboot). NO APPROVAL CHECK.
+
+    Caller is responsible for gating. Audited regardless. Most of this
+    homelab is QEMU (OPNSense, HomeAssistant, Debian13, ...), so without
+    this the agent had no way to act on the majority of the fleet.
+    """
+    return _restart_guest_raw(node, vmid, "qemu")
 
 
 def restart_lxc(node: str, vmid: int) -> dict:
@@ -909,6 +966,35 @@ def restart_lxc(node: str, vmid: int) -> dict:
             "vmid": vmid,
         }
     result = restart_lxc_raw(node, vmid)
+    if result.get("executed"):
+        result["approved_by"] = decision.get("by")
+    return result
+
+
+def restart_vm(node: str, vmid: int) -> dict:
+    """Restart a QEMU VM with built-in Telegram approval gate.
+
+    The *_raw variant is what the agent's registry wires; this one is for
+    CLI / simple callers that have no graph-level gate.
+    """
+    node = node or _PROXMOX_DEFAULT_NODE
+    status = check_proxmox_status(node, vmid)
+    details = (
+        f"Node:  {node}\n"
+        f"VMID:  {vmid}\n"
+        f"Kind:  qemu\n"
+        f"Name:  {status.get('name', '?')}\n"
+        f"Current state: {status.get('status', '?')}, "
+        f"mem={status.get('mem_pct', '?')}% "
+        f"(source={status.get('mem_pct_source', '?')}), "
+        f"uptime={status.get('uptime_h', '?')}h"
+    )
+    decision = request_telegram_approval(
+        action=f"restart_vm(node={node}, vmid={vmid})", details=details)
+    if decision["decision"] != "approved":
+        return {"executed": False, "reason": decision["decision"],
+                "by": decision.get("by"), "vmid": vmid}
+    result = restart_vm_raw(node, vmid)
     if result.get("executed"):
         result["approved_by"] = decision.get("by")
     return result

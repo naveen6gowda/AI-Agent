@@ -10,3 +10,5 @@ EnvironmentFile=/opt/sentinel/.env
 ExecStart=/root/.local/bin/uv run python smart_monitor.py --alert --no-summary
 StandardOutput=journal
 StandardError=journal
+# exit 2 = "found a problem, already sent its own alert" — not a unit failure
+SuccessExitStatus=2
