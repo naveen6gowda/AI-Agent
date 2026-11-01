@@ -532,6 +532,33 @@ def next_departures(limit: int = 4) -> dict:
     return _next_departures(limit=limit)
 
 
+@tool
+def manage_list(action: str = "show", item: str = "") -> dict:
+    """The operator's "Indian List" checklist (the one Alexa fills and the
+    iPhone page shows; Excel copy on this box). action: show | add | done |
+    undone | remove | clear_done (drops ticked-off rows). item: the name(s)
+    for add/done/undone/remove — "milk and eggs" means two items. Names are
+    matched forgivingly ("tomato" finds "Tomatoes"). Not gated."""
+    import sentinel_list as sl
+    action = action.strip().lower()
+    if action == "add":
+        added, already = sl.add(item)
+        res = {"added": added, "already_on_list": already}
+    elif action in ("done", "undone"):
+        hits, misses = sl.set_done(item, action == "done")
+        res = {"updated": hits, "not_found": misses}
+    elif action == "remove":
+        hits, misses = sl.remove(item)
+        res = {"removed": hits, "not_found": misses}
+    elif action == "clear_done":
+        res = {"cleared": sl.clear_done()}
+    elif action == "show":
+        res = {}
+    else:
+        return {"error": f"unknown action {action!r}: use show|add|done|undone|remove|clear_done"}
+    return {**res, "items": sl.items()}
+
+
 _TOOLS = [
     get_service_catalog, get_service,
     list_proxmox_nodes, list_proxmox_guests,
@@ -543,7 +570,7 @@ _TOOLS = [
     get_ha_entity, list_ha_entities, list_esphome_sensors,
     check_esphome_devices,
     search_docs, speak_on_alexa,
-    check_commute, next_departures,
+    check_commute, next_departures, manage_list,
     list_docker_containers, check_docker_container,
     check_internet_speed,
     restart_lxc, restart_vm, restart_docker_container, call_ha_service,

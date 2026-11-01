@@ -5,7 +5,6 @@ import respx
 from fastapi import HTTPException
 
 import agent_v5_approval as agent
-import models
 import sentinel_bot as bot
 import voice_server
 
@@ -55,10 +54,3 @@ def test_voice_token_check(monkeypatch):
         else:
             raise AssertionError(f"{bad!r} was accepted")
 
-
-def test_active_model_write_is_atomic(tmp_path, monkeypatch):
-    target = tmp_path / "active_model.txt"
-    monkeypatch.setattr(models, "_ACTIVE_MODEL_FILE", str(target))
-    models.set_active_model("  qwen-x  ")
-    assert target.read_text() == "qwen-x"
-    assert not (tmp_path / "active_model.txt.tmp").exists()

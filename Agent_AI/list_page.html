@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Indian List">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Indian List</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#14171f;--mute:#6b7280;--line:#e5e7eb;--acc:#2563eb;--ok:#16a34a;--warn:#fef3c7}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b26;--fg:#e6e8ee;--mute:#8b93a5;--line:#262d3d;--acc:#5b9cff;--ok:#3fbf6a;--warn:#3a2f12}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:560px;margin:0 auto;padding:max(16px,env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{font-size:26px;margin:8px 0 4px}
+#count{color:var(--mute);font-size:14px;white-space:nowrap}
+#note{display:none;background:var(--warn);padding:10px 12px;border-radius:10px;font-size:14px;margin:8px 0}
+form{display:flex;gap:8px;margin:12px 0}
+input[type=text]{flex:1;min-width:0;font:inherit;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg)}
+button,.btn{font:inherit;font-weight:600;padding:12px 18px;border:0;border-radius:12px;background:var(--acc);color:#fff;text-decoration:none;cursor:pointer}
+.ghost{background:transparent;color:var(--acc);border:1px solid var(--line);font-weight:500}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px #0000000f}
+th{text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);padding:10px 12px;border-bottom:1px solid var(--line)}
+td{padding:12px;border-bottom:1px solid var(--line);word-break:break-word}
+tr:last-child td{border-bottom:0}
+.c{width:48px;text-align:center}
+input[type=checkbox]{width:24px;height:24px;accent-color:var(--ok);vertical-align:middle}
+.name[contenteditable]{cursor:text;outline:none;border-radius:6px}
+.name[contenteditable]:focus{box-shadow:inset 0 0 0 2px var(--acc)}
+tr.done .name{text-decoration:line-through;color:var(--mute)}
+.x{background:none;color:var(--mute);padding:4px 10px;font-weight:400;font-size:18px}
+.empty{color:var(--mute);text-align:center;padding:28px 16px}
+.bar{display:flex;gap:8px;justify-content:space-between;margin-top:12px}
+.say{color:var(--mute);font-size:13px;margin-top:20px;line-height:1.6}
+.say b{color:var(--fg);font-weight:500}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Indian List</h1><span id="count"></span></header>
+  <div id="note" role="status"></div>
+  <form id="add"><input type="text" id="new" placeholder="Add an item" autocomplete="off" enterkeyhint="done" aria-label="New item"><button>Add</button></form>
+  <table>
+    <thead><tr><th class="c">Done</th><th>Item</th><th class="c"></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="bar"><button class="ghost" id="clear">Clear done</button><a class="btn ghost" href="list.xlsx" download>Excel ⬇</a></div>
+  <p class="say">Alexa: <b>“tell Indian List to add milk”</b> · <b>“…milk is done”</b> · <b>“…remove milk”</b> · <b>“ask Indian List what’s on the list”</b> · <b>“tell Indian List to clear done items”</b></p>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const load = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+// Offline-first: last server copy + queued changes live in localStorage.
+let items = load('sl-items') || [], queue = load('sl-queue') || [], busy = false, editing = false;
+
+function note(text) { $('#note').textContent = text; $('#note').style.display = text ? 'block' : 'none'; }
+
+function render() {
+  if (editing) return;   // the 10 s poll must not wipe a half-typed fix
+  const left = items.filter(i => !i.done).length;
+  $('#count').textContent = items.length ? `${left} to get · ${items.length - left} done` : '';
+  const tb = $('#rows'); tb.innerHTML = '';
+  if (!items.length) { tb.innerHTML = '<tr><td colspan="3" class="empty">The list is empty.</td></tr>'; return; }
+  for (const it of [...items].sort((a, b) => a.done - b.done)) {
+    const tr = document.createElement('tr');
+    tr.className = it.done ? 'done' : '';
+    tr.innerHTML = '<td class="c"><input type="checkbox" aria-label="Done"></td><td class="name"></td><td class="c"><button class="x" aria-label="Remove">✕</button></td>';
+    const nm = tr.querySelector('.name');
+    nm.textContent = it.item;
+    if (it.id !== 'pending') {   // tap the name to fix its spelling; Enter or tap away saves
+      nm.contentEditable = 'plaintext-only'; nm.spellcheck = true; nm.title = 'Tap to edit';
+      nm.onfocus = () => { editing = true; };
+      nm.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); nm.blur(); }
+                            if (e.key === 'Escape') { nm.textContent = it.item; nm.blur(); } };
+      nm.onblur = () => {
+        editing = false;
+        const v = nm.textContent.replace(/\s+/g, ' ').trim();
+        if (!v) { nm.textContent = it.item; return; }
+        if (v !== it.item) { it.item = v; change('PATCH', 'api/items/' + it.id, { item: v }); }
+      };
+    }
+    const cb = tr.querySelector('input');
+    cb.checked = it.done;
+    cb.onchange = () => { it.done = cb.checked; change('PATCH', 'api/items/' + it.id, { done: it.done }); };
+    tr.querySelector('.x').onclick = () => { items = items.filter(x => x !== it); change('DELETE', 'api/items/' + it.id); };
+    tb.append(tr);
+  }
+}
+
+function change(method, url, body) {
+  queue.push([method, url, body]);
+  save('sl-queue', queue); save('sl-items', items);
+  render(); sync();
+}
+
+async function call(method, url, body) {
+  const r = await fetch(url, { method, cache: 'no-store', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { const e = new Error(r.status); e.status = r.status; throw e; }
+  return r.json();
+}
+
+async function sync() {
+  if (busy) return;
+  busy = true;
+  let ok = false;
+  try {
+    while (queue.length) {
+      try { await call(...queue[0]); }
+      catch (e) { if (!e.status || e.status >= 500 || e.status === 401) throw e; }  // 404 etc: already gone, drop it
+      queue.shift(); save('sl-queue', queue);
+    }
+    items = (await call('GET', 'api/items')).items;
+    save('sl-items', items); note(''); ok = true;
+  } catch (e) {
+    note(e.status === 401 ? 'Not signed in: open your full Indian List link (with ?k=) again.'
+                          : 'Offline: showing your last copy. Changes sync when you are back online.');
+  } finally {
+    busy = false; render();
+    if (ok && queue.length) sync();
+  }
+}
+
+$('#add').onsubmit = e => {
+  e.preventDefault();
+  const v = $('#new').value.trim();
+  if (!v) return;
+  $('#new').value = '';
+  items.push({ id: 'pending', item: v, done: false });
+  change('POST', 'api/items', { item: v });
+};
+$('#clear').onclick = () => {
+  if (!items.some(i => i.done)) return;
+  items = items.filter(i => !i.done);
+  change('POST', 'api/clear-done');
+};
+
+setInterval(() => { if (!document.hidden) sync(); }, 10000);   // picks up what Alexa added
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+addEventListener('online', sync);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+render(); sync();
+</script>
+</body>
+</html>

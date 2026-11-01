@@ -1,0 +1,79 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "indian list",
+      "intents": [
+        {"name": "AMAZON.CancelIntent", "samples": []},
+        {"name": "AMAZON.HelpIntent", "samples": []},
+        {"name": "AMAZON.StopIntent", "samples": []},
+        {"name": "AMAZON.NavigateHomeIntent", "samples": []},
+        {"name": "AMAZON.FallbackIntent", "samples": []},
+        {
+          "name": "AddItemIntent",
+          "slots": [{"name": "item", "type": "AMAZON.SearchQuery"}],
+          "samples": [
+            "add {item}",
+            "add {item} to the list",
+            "add {item} to my list",
+            "put {item} on the list",
+            "I need {item}",
+            "we need {item}",
+            "buy {item}"
+          ]
+        },
+        {
+          "name": "RemoveItemIntent",
+          "slots": [{"name": "item", "type": "AMAZON.SearchQuery"}],
+          "samples": [
+            "remove {item}",
+            "remove {item} from the list",
+            "delete {item}",
+            "delete {item} from the list",
+            "take {item} off the list",
+            "take off {item}"
+          ]
+        },
+        {
+          "name": "DoneItemIntent",
+          "slots": [{"name": "item", "type": "AMAZON.SearchQuery"}],
+          "samples": [
+            "{item} is done",
+            "{item} are done",
+            "{item} is taken",
+            "mark {item} as done",
+            "mark {item} done",
+            "tick off {item}",
+            "check off {item}",
+            "I got {item}",
+            "I have taken {item}"
+          ]
+        },
+        {
+          "name": "ReadListIntent",
+          "slots": [],
+          "samples": [
+            "what's on the list",
+            "what is on the list",
+            "what is on my list",
+            "read the list",
+            "read my list",
+            "what do I need",
+            "what do we need"
+          ]
+        },
+        {
+          "name": "ClearDoneIntent",
+          "slots": [],
+          "samples": [
+            "clear done items",
+            "clear the done items",
+            "clear completed items",
+            "clear the ticked items",
+            "clean up the list"
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}

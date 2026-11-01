@@ -20,7 +20,7 @@
 <text x="80" y="455" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#a8b8c8" text-anchor="start" >pytest in CI · golden evals · Langfuse traces</text>
 <rect x="60" y="476" width="4" height="44" rx="2" fill="#34d399"/>
 <text x="80" y="494" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#f1f5f9" text-anchor="start" >100% local LLM</text>
-<text x="80" y="517" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#a8b8c8" text-anchor="start" >LM Studio · OpenAI-compatible · €0 per call</text>
+<text x="80" y="517" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#a8b8c8" text-anchor="start" >Strata on Apple Silicon · €0 per call</text>
 <rect x="700" y="36" width="540" height="488" rx="22" fill="#0a1824" stroke="#24435a" stroke-width="1.5"/>
 <rect x="700" y="36" width="540" height="54" rx="22" fill="#10263a"/>
 <rect x="700" y="68" width="540" height="22" fill="#10263a"/>

@@ -16,7 +16,8 @@ are exactly what you would choose again for a long-lived agent platform:
 2. **Checkpointer-backed interrupts**: approvals survive process restarts;
    state is durable by construction.
 3. **Single-model factory** (`models.py`): the whole system repoints to a new
-   LLM with one env change; probe-before-switch prevents bricking.
+   LLM with one env change (LM Studio → Strata on 2026-10-19 was exactly
+   that).
 4. **Declarative topology** (`catalog.yaml` with criticality + restart
    policy): the agent's world model is data, reviewable and diffable.
 
@@ -28,14 +29,14 @@ that is the roadmap below.
 ## 2. Current state (post-cleanup, 2026-07-05)
 
 ```
-interfaces   sentinel_bot.py · voice_server.py · finance_server.py
+interfaces   sentinel_bot.py · voice_server.py · finance_server.py · list_server.py
 agent        agent_v5_approval.py  (graph, policy gate, prompts, Langfuse)
 tools/integr tools.py (Proxmox/HA/Telegram) · docker_tools.py (Portainer)
              + monitor modules doubling as tool backends
 knowledge    catalog.py/yaml · rag.py (BM25 over docs/)
-model        models.py → LM Studio @ llm.lan (single LLM)
+model        models.py → Strata @ Mac via ssh -R tunnel 127.0.0.1:18080 (single LLM)
 state        bot_checkpoints.sqlite · checkpoints.sqlite · audit.log ·
-             transit_state.json · active_model.txt (all in repo root, gitignored)
+             transit_state.json (all in repo root, gitignored)
 scheduling   17 systemd units (3 long-running, 8 timers + maintenance)
 ```
 
@@ -149,7 +150,7 @@ Each phase is independently shippable and leaves the system running.
 | Competency | Where it shows |
 |------------|----------------|
 | Agent safety / HITL | policy gate, interrupts, audit log, policy-as-data |
-| LLMOps | Langfuse traces, eval harness, probe-before-switch, fallback chain |
+| LLMOps | Langfuse traces, eval harness, one-env-change model swap, fallback chain |
 | Platform thinking | one tool registry → LangGraph + MCP + Telegram frontends |
 | Ops discipline | systemd fleet, OnFailure alerting, retention jobs, runbooks |
 | Cost engineering | local-first single LLM, zero marginal token cost |
@@ -194,3 +195,21 @@ Still open (operator decisions, not bugs):
 - **A bot restart mid-approval** leaves that tool call unanswered in the
   thread (never observed in the checkpoint DB; the approval times out
   normally in every other case).
+
+## 7. Change 2026-10-19 — one engine: Strata
+
+The model moved from LM Studio (Qwen3.6-35B-A3B) to **Strata**, an open-source
+MoE inference engine, serving Qwen3.8-Flash-Next on the Mac's Metal GPU. The
+single-model factory made it a two-line `.env` change (`MLX_BASE_URL`,
+`MLX_MODEL`); the Mac pushes Strata to the LXC with a reverse SSH tunnel
+(LaunchAgent `com.strata.sentinel-tunnel`, `127.0.0.1:18080`).
+
+What went away: the Telegram `/model` picker, `probe_model`, `list_models`,
+`var/active_model.txt` and the agent's live rebind. They existed because LM
+Studio listed models it could not run; Strata serves one model, so a picker
+would only offer the same id. Agent and monitor helpers share the one URL.
+
+Measured after the switch: agent turn with a tool call 107 s, helper summary
+7.5 s, 133 tests green. Since 2026-10-28 the Mac runs the Gyro-S pack (decode
+~15 tok/s, 65K context); Strata ignores the request's model name, so
+`MLX_MODEL` did not need to change.

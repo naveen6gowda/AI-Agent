@@ -1,0 +1,22 @@
+[Unit]
+OnFailure=sentinel-failure-alert@%n.service
+Description=HomelabSentinel — Sentinel List (Alexa skill + phone checklist page)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/sentinel
+ExecStart=/root/.local/bin/uv run python list_server.py
+Restart=on-failure
+RestartSec=10
+# uv run exits 143 on SIGTERM / 130 on SIGINT: a normal stop is not a failure.
+SuccessExitStatus=130 143
+KillSignal=SIGINT
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

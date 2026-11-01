@@ -205,21 +205,6 @@ class AgentState(TypedDict):
 llm = agent_llm()
 llm_with_tools = llm.bind_tools(_TOOLS)
 
-# The operator can switch models live via the Telegram /model command
-# (persisted by models.set_active_model). Rebuild the tool-bound client only
-# when the active model actually changes, so normal turns pay nothing.
-_ACTIVE = {"model": _get_active_model(), "bound": llm_with_tools}
-
-
-def _active_llm_with_tools():
-    current = _get_active_model()
-    if current != _ACTIVE["model"] or _ACTIVE["bound"] is None:
-        _ACTIVE["model"] = current
-        _ACTIVE["bound"] = agent_llm(model=current).bind_tools(_TOOLS)
-        print(f"[agent] active model -> {current}")
-    return _ACTIVE["bound"]
-
-
 # LM Studio JIT-loads the selected model; right after a /model switch it may
 # still hold the previous (large) model in RAM and crash loading the new one
 # ("The model has crashed ... Exit code: null", surfaced as a 400). The crash
@@ -262,7 +247,7 @@ def _invoke_resilient(bound, messages):
     if configured; past that we raise LLMUnavailable so the frontends
     can tell the operator the truth instead of a stack trace.
     """
-    model = _ACTIVE.get("model") or _get_active_model()
+    model = _get_active_model()
     try:
         response = bound.invoke(messages)
     except Exception as e:
@@ -376,7 +361,7 @@ def _log_usage(response) -> None:
 
 def agent_node(state: AgentState) -> dict:
     history = _cache_tail(_bounded_history(state["messages"]))
-    response = _invoke_resilient(_active_llm_with_tools(), [_SYSTEM_MSG] + history)
+    response = _invoke_resilient(llm_with_tools, [_SYSTEM_MSG] + history)
     _log_usage(response)
     return {"messages": [response]}
 

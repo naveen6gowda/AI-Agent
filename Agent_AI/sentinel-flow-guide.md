@@ -16,8 +16,8 @@ layers that deliberately do not trust each other:
   Proxmox, Home Assistant, Portainer, the MVG transit API and Firefly III.
   Monitors run on systemd timers **without any LLM** — detection never
   depends on a model being awake.
-- **The brain — one local LLM.** A single MLX model on a MacBook (LM Studio,
-  OpenAI-compatible API). Every component obtains it from `models.py`, the
+- **The brain — one local LLM.** Qwen3.8-Flash-Next served by Strata on a
+  MacBook's Metal GPU (OpenAI-compatible API). Every component obtains it from `models.py`, the
   only file allowed to instantiate a model. Zero marginal token cost.
 - **The gate — the policy node.** A LangGraph node inspects every tool call
   the LLM proposes. Destructive ones freeze the whole graph with
@@ -115,7 +115,7 @@ def agent_node(state: AgentState) -> dict:
   keeping tool call/result pairs intact, so a long-lived chat can't grow
   per-turn cost without bound.
 - `_invoke_resilient` (line 261) is the Phase 5 fallback chain: primary
-  call → if the error looks like an LM Studio model reload, wait 6 s and
+  call → if the error looks like a model reload, wait 6 s and
   retry once → if the connection is dead, try the optional
   `MLX_FALLBACK_*` endpoint → otherwise raise a typed `LLMUnavailable`.
 - The response either contains `tool_calls` (the model wants to act) or
@@ -332,25 +332,22 @@ MCP call, model switch and LLM token count is appended as a JSON line to
 ## 6. The brain — one model, honestly managed
 
 After the pay-as-you-go Anthropic account ran dry (May 2026), the system
-was collapsed onto **one local MLX model** served by LM Studio on a
-MacBook. `models.py` is the only file allowed to build a model client;
+was collapsed onto **one local model** on a MacBook — first LM Studio,
+since 2026-10-19 Strata (an open-source MoE engine with a Metal backend). `models.py` is the only file allowed to build a model client;
 everything imports `agent_llm()` (tool-calling loops, temp 0, 2048 tokens)
 or `helper_llm()` (one-shot summaries, 512 tokens). Repointing the entire
 platform is a one-line `.env` change (`MLX_BASE_URL`, `MLX_MODEL`).
 
-- **/model — switch live, but probe first.** The Telegram `/model` command
-  lists the server's models as buttons (sentinel_bot.py:289). Before
-  persisting a pick, `probe_model()` (models.py:107) forces a real 2-token
-  completion: LM Studio happily *lists* models the Mac cannot *run*
-  (they load, then every request dies with "Compute error"), and since the
-  active model is global — agent AND monitors — a bad pick would brick
-  everything. Failures leave the old model active. The choice persists in
-  `var/active_model.txt` across restarts.
+- **One model, one URL.** Until 2026-10-19 a Telegram `/model` picker let
+  the operator switch LM Studio models live, with a 2-token probe first
+  (LM Studio *lists* models the Mac cannot *run*). Strata serves exactly one
+  model, so the picker, the probe and `var/active_model.txt` were deleted;
+  the model is whatever `MLX_MODEL` names on `MLX_BASE_URL`.
 - **The fallback chain.** `_invoke_resilient` (agent_v5_approval.py:261):
   primary → one patient retry on reload markers → optional
   `MLX_FALLBACK_*` endpoint → typed `LLMUnavailable`.
 - **Honest degradation.** The bot catches `LLMUnavailable` and says:
-  *"The local LLM server is unreachable (is the Mac awake and LM Studio
+  *"The local LLM server is unreachable (is the Mac awake and Strata
   running?). Monitors and alerts keep working — only chat needs the
   model."* (sentinel_bot.py:501). No stack traces at the operator.
 - **Token economy.** History capped at 40 messages; per-turn usage
@@ -499,8 +496,7 @@ finance_server.py, finance_parser.py, firefly_client.py   finance bridge
 evals/                 golden set (12 cases) + runner
 tests/                 policy-gate + client + unit tests
 systemd/               unit files (copied to /etc/systemd/system/)
-var/                   checkpoints.sqlite · audit.log · approvals/ ·
-                       active_model.txt
+var/                   checkpoints.sqlite · audit.log · approvals/
 docs/                  runbooks + ARCHITECTURE.md + memory/
 legacy/                v1–v4 agents (history, not live)
 ```
@@ -524,11 +520,12 @@ legacy/                v1–v4 agents (history, not live)
    allows one getUpdates consumer per token, and sentinel_bot owns it. The
    MCP server only sends the card; the bot writes the tapped decision to
    `var/approvals/<rid>.json`; the server watches the file.
-5. **Why does /model run a 2-token completion before switching?**
-   LM Studio lists models the Mac can't execute. The active model is
-   global (agent + monitors), so persisting a broken pick would brick the
-   whole system. The probe forces the server to actually run the model;
-   failure leaves the old model active.
+5. **Why was the /model picker removed?** It existed because LM Studio
+   lists models the Mac can't execute, so every pick was probed with a
+   2-token completion first. After the move to Strata (one engine, one
+   model) the picker could only offer the same id, and keeping dead
+   switching code is how a global setting bricks agent and monitors at
+   once. Swapping models is now a reviewed `.env` change.
 6. **Nobody's home. May the agent turn off the heating on its own?** It
    may propose it (the prompt requires `check_presence_state` first) —
    but `call_ha_service` is destructive, so the actual change still

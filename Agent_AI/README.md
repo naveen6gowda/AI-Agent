@@ -15,8 +15,8 @@ that watches a Proxmox homelab and acts on it through a human-approval gate.
 ## ▶️ Run it
 
 **Prerequisites:** Python **3.14**, [`uv`](https://github.com/astral-sh/uv), an
-**OpenAI-compatible local LLM server** (e.g. LM Studio with a tool-calling
-model), and a homelab to point it at (Proxmox API token, Home Assistant token,
+**OpenAI-compatible local LLM server** (e.g. Strata or LM Studio with a
+tool-calling model), and a homelab to point it at (Proxmox API token, Home Assistant token,
 a Telegram bot).
 
 ```bash
@@ -58,14 +58,15 @@ any unit fails.
 | Layer | File | What it does |
 |------|------|--------------|
 | **Brain** | `agent_v5_approval.py` | **Production agent** — LangGraph `interrupt()` approval gate, SQLite checkpointer, Langfuse tracing, resilient LLM call (reload-retry → fallback endpoint → `LLMUnavailable`) |
-| | `registry.py` | All 32 `@tool` definitions in one catalog (`TOOLS` / `TOOLS_BY_NAME`), shared by agent, MCP server and tests |
+| | `registry.py` | All 33 `@tool` definitions in one catalog (`TOOLS` / `TOOLS_BY_NAME`), shared by agent, MCP server and tests |
 | | `legacy/` | The 5-lesson course that led here (v1 raw loop → v4 tracing) — archived, not live |
-| **Front-ends** | `sentinel_bot.py` | Long-running Telegram bot (single-poller + event-based approvals, `/model` switcher) |
+| **Front-ends** | `sentinel_bot.py` | Long-running Telegram bot (single-poller + event-based approvals) |
 | | `voice_server.py` / `voice.py` | FastAPI Alexa bridge — read-only by construction |
 | | `mcp_server.py` | MCP over streamable HTTP with bearer auth; destructive calls become Telegram approval cards, default deny on timeout |
 | **Life automations** | `db_train_monitor.py` | Commute guard: MVG departures → delay/cancellation alerts on the Echo |
 | | `finance_server.py` / `finance_parser.py` / `firefly_client.py` | Bank-app push → HA → parsed → draft transaction in Firefly III |
-| **Foundation** | `models.py` | **Single-LLM factory**: one local OpenAI-compatible model for agent + helpers; runtime switch with probe-before-switch |
+| | `list_server.py` / `sentinel_list.py` | Indian List: Alexa custom skill + phone checklist page with an Excel copy; the one internet-facing service (own Cloudflare tunnel, fails closed without its secrets) |
+| **Foundation** | `models.py` | **Single-LLM factory**: one local OpenAI-compatible model for agent + helpers; repointed with two `.env` lines (`MLX_BASE_URL`, `MLX_MODEL`) |
 | | `catalog.py` | Pydantic-validated loader for `catalog.yaml` (policy as data) |
 | | `tools.py` | The integration layer — Proxmox / HA / Telegram + the approval primitive |
 | **Monitors** | `reachability.py` | Parallel TCP/HTTP endpoint sweep |

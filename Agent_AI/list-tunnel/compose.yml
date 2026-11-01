@@ -1,0 +1,15 @@
+# Public door for the Sentinel List ONLY: list.example.com → localhost:8097.
+# Dedicated Cloudflare tunnel "sentinel-list" (remotely managed); the main homelab
+# tunnels are not touched. Host networking so the ingress target
+# is http://localhost:8097 — nothing else on this box is routed by the tunnel.
+#
+#   up:   docker compose -f /opt/sentinel/list-tunnel/compose.yml up -d
+#   .env next to this file (gitignored): TUNNEL_TOKEN=<token of the sentinel-list tunnel>
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: sentinel-list-tunnel
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    network_mode: host
+    restart: unless-stopped

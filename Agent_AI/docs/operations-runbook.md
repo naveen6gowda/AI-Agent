@@ -14,8 +14,9 @@ after ruff and pytest pass).
 | `sentinel-bot` | — | Telegram chat agent + approval buttons (the ONLY Telegram poller) |
 | `sentinel-mcp` | 8765 | MCP server: the same tools for Claude Code / Hermes, bearer token |
 | `sentinel-voice` | 8099 | HA → agent → Alexa bridge, bearer token |
+| `sentinel-list` | 8097 | Indian List: Alexa custom skill + phone checklist page, public via list-tunnel/ (cookie/?k= key, secret Alexa path) |
 | `sentinel-finance` | 8098 | HA phone notification → Firefly III, bearer token |
-| haproxy | 9099 | the LLM front door: Mac LM Studio on the LAN, Tailscale as backup |
+| haproxy | 9099 | old LLM front door to LM Studio on the Mac; Sentinel stopped using it 2026-10-19 (Hermes' fallback still does) |
 
 ```bash
 systemctl status sentinel-bot                  # any unit
@@ -79,15 +80,16 @@ systemctl stop sentinel-bot                    # stop the bot
 tail -f /opt/sentinel/var/audit.log | jq .     # approvals, restarts, tool calls
 ls /opt/sentinel/var/alerts/                   # open incidents per monitor
 cat /opt/sentinel/var/esphome_state.json       # last known ESP node states
-cat /opt/sentinel/var/active_model.txt         # the model /model selected
 ```
 
 ## Models
 
-One local model serves everything: LM Studio on the Mac, reached through
-the haproxy front door on this LXC (`MLX_BASE_URL=http://sentinel.lan:9099/v1`).
-The active model id is `var/active_model.txt`, switched live with the
-Telegram `/model` command (it probes the model before switching). If the Mac
+One local model serves everything: Strata on the Mac (Qwen3.8-Flash-Next,
+Metal), pushed to this LXC by the Mac's reverse SSH tunnel
+(`MLX_BASE_URL=http://127.0.0.1:18080/v1`, LaunchAgent
+`com.strata.sentinel-tunnel`). There is no `/model` command any more: to
+change the model, edit `MLX_MODEL`/`MLX_BASE_URL` in `.env` and restart the
+services. `curl -s 127.0.0.1:18080/v1/models` shows whether the tunnel is up. If the Mac
 is asleep, chat answers "LLM server unreachable"; the monitors keep working
 because they detect problems without the LLM — only their summaries degrade
 to a plain-text fallback.

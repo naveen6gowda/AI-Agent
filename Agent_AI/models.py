@@ -59,89 +59,12 @@ _MAX_RETRIES = int(os.getenv("MLX_MAX_RETRIES", "2"))
 # that ignore that field.)
 _HELPER_MIN_TOKENS = int(os.getenv("MLX_HELPER_MIN_TOKENS", "0"))
 
-# The operator picks the active model at runtime via the Telegram /model
-# command; the choice is persisted here so it survives bot restarts and is
-# shared by the agent + the monitors (the server keeps one model hot, so we
-# don't want them disagreeing). Empty file / missing -> fall back to MLX_MODEL.
-_ACTIVE_MODEL_FILE = os.getenv("ACTIVE_MODEL_FILE",
-                               os.path.join(os.path.dirname(__file__),
-                                            "var", "active_model.txt"))
 
-
+# One model, one URL: whatever MLX_MODEL names on MLX_BASE_URL. The Telegram
+# /model picker + var/active_model.txt override were removed 2026-10-19.
 def get_active_model() -> str:
-    """The model id currently selected (via /model), else the MLX_MODEL default."""
-    try:
-        with open(_ACTIVE_MODEL_FILE) as f:
-            chosen = f.read().strip()
-        if chosen:
-            return chosen
-    except OSError:
-        pass
+    """The one model id (MLX_MODEL)."""
     return _MLX_MODEL
-
-
-def set_active_model(model_id: str) -> None:
-    """Persist the operator's /model choice. Used by the Telegram bot.
-
-    Atomic (write + rename): every monitor reads this file on each run, and
-    a reader catching it half-written would fall back to MLX_MODEL."""
-    tmp = f"{_ACTIVE_MODEL_FILE}.tmp"
-    with open(tmp, "w") as f:
-        f.write(model_id.strip())
-    os.replace(tmp, _ACTIVE_MODEL_FILE)
-
-
-def list_models() -> list:
-    """Every model the server advertises at /v1/models (sorted ids).
-
-    Returns [] if the server is unreachable / the key is wrong — callers
-    surface that to the operator rather than crashing.
-    """
-    try:
-        r = httpx.get(
-            f"{_MLX_BASE_URL}/models",
-            headers={"Authorization": f"Bearer {_MLX_API_KEY}"},
-            timeout=15.0,
-        )
-        r.raise_for_status()
-        ids = (m["id"] for m in r.json().get("data", []) if m.get("id"))
-        # Drop embedding models — they can't run the chat/agent loop, so they
-        # shouldn't appear in the /model picker.
-        return sorted(i for i in ids if "embed" not in i.lower())
-    except (httpx.HTTPError, ValueError, KeyError):
-        return []
-
-
-def probe_model(model_id: str, timeout: float = 180.0):
-    """Ask the server to actually RUN a model, not just list it.
-
-    LM Studio lists every downloaded model at /v1/models, including ones this
-    machine cannot execute — those JIT-load fine and then every request dies
-    with 'Compute error'. Since the active model is global (agent + all
-    monitors), persisting such a model bricks the whole system. A 2-token
-    completion catches that before the switch.
-
-    Returns None if the model answered, else a short human-readable reason.
-    Timeout is generous: a cold JIT load of a big model takes a while.
-    """
-    try:
-        r = httpx.post(
-            f"{_MLX_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {_MLX_API_KEY}"},
-            json={"model": model_id,
-                  "messages": [{"role": "user", "content": "Say OK"}],
-                  "max_tokens": 8},
-            timeout=timeout,
-        )
-    except httpx.HTTPError as e:
-        return f"server unreachable: {type(e).__name__}: {e}"
-    if r.status_code != 200:
-        try:
-            detail = r.json().get("error", r.text)
-        except ValueError:
-            detail = r.text
-        return str(detail)[:300]
-    return None
 
 
 def _mlx(temperature: float, max_tokens: int, timeout: float, model=None,

@@ -53,18 +53,6 @@ load_dotenv()
 # request_telegram_approval — the bot supplies its own.
 from agent_v5_approval import run_one  # noqa: E402
 from models import LLMUnavailable as _LLMUnavailable
-from models import (
-    get_active_model as _get_active_model,
-)
-from models import (  # noqa: E402
-    list_models as _list_models,
-)
-from models import (
-    probe_model as _probe_model,
-)
-from models import (
-    set_active_model as _set_active_model,
-)
 from tools import _audit  # reuse the audit log helper  # noqa: E402
 
 # ----------------------------------------------------------------------
@@ -285,78 +273,6 @@ def request_approval_via_bot(action: str, details: str,
     return result
 
 
-# ----------------------------------------------------------------------
-# Model picker (/model) — list LM Studio models, switch on tap. The active
-# model is global (shared by agent + monitors) and persisted by models.py.
-# callback_data is "m:<index>" into this list (Telegram caps callback_data
-# at 64 bytes, so we send an index rather than the full model id).
-# ----------------------------------------------------------------------
-_model_choices: list = []
-
-
-def _send_model_picker(chat_id: str) -> None:
-    global _model_choices
-    models = _list_models()
-    if not models:
-        _send_message(chat_id,
-                      "❌ Couldn't list models — the LLM server didn't answer. "
-                      "Check LM Studio is up and the API key is right.")
-        return
-    _model_choices = models
-    current = _get_active_model()
-    keyboard = [
-        [{"text": ("✅ " if m == current else "") + m, "callback_data": f"m:{i}"}]
-        for i, m in enumerate(models)
-    ]
-    _send_message(chat_id,
-                  f"Current model: {current}\nPick a model for your next tasks:",
-                  reply_markup={"inline_keyboard": keyboard})
-
-
-def _handle_model_pick(cb: dict, idx_str: str) -> None:
-    chat_id = str(cb.get("message", {}).get("chat", {}).get("id"))
-    message_id = cb.get("message", {}).get("message_id")
-    user = (cb.get("from", {}).get("username")
-            or cb.get("from", {}).get("first_name", "?"))
-    if chat_id not in AUTHORIZED_CHAT_IDS:
-        _answer_callback(cb["id"], "not authorized")
-        return
-    try:
-        model = _model_choices[int(idx_str)]
-    except (ValueError, IndexError):
-        _answer_callback(cb["id"], "list expired — send /model again")
-        return
-    # Don't persist blindly: LM Studio lists models this machine can't run
-    # (they JIT-load, then every request dies with "Compute error"), and the
-    # choice is global — a bad pick bricks the agent AND all monitors. Probe
-    # in a worker thread; a cold JIT load is slow and this callback runs on
-    # the bot's single polling thread.
-    _answer_callback(cb["id"], f"Testing {model} …")
-    if message_id:
-        _edit_message(chat_id, message_id,
-                      f"⏳ Testing model (loads it if cold, may take a "
-                      f"minute):\n{model}")
-
-    def _probe_and_set() -> None:
-        error = _probe_model(model)
-        if error:
-            if message_id:
-                _edit_message(
-                    chat_id, message_id,
-                    f"❌ NOT switched — {model} fails on the LLM server:\n"
-                    f"{error}\n\nStill on: {_get_active_model()}")
-            print(f"[bot] model probe FAILED for {model}: {error}")
-            return
-        _set_active_model(model)
-        if message_id:
-            _edit_message(chat_id, message_id,
-                          f"✅ Active model set to:\n{model}")
-        _audit("model_switch", {"model": model, "by": user})
-        print(f"[bot] model switched -> {model} (by @{user})")
-
-    threading.Thread(target=_probe_and_set, daemon=True).start()
-
-
 def _apply_docker_tap(rid: str, decision: str, by: str) -> None:
     """Hand a tapped restart card straight to docker_tools (worker thread).
 
@@ -432,16 +348,13 @@ def _handle_callback(cb: dict) -> None:
     if len(parts) != 2:
         _answer_callback(cb["id"], "malformed callback")
         return
-    # Approval/model buttons only ever live in authorized chats, but check
+    # Approval buttons only ever live in authorized chats, but check
     # anyway — defense in depth if the bot is ever added to a group.
     cb_chat = str((cb.get("message") or {}).get("chat", {}).get("id"))
     if cb_chat not in AUTHORIZED_CHAT_IDS:
         _answer_callback(cb["id"], "not authorized")
         return
     prefix, token = parts
-    if prefix == "m":           # model picker, not an approval
-        _handle_model_pick(cb, token)
-        return
     if prefix == "mcpapp":      # MCP server approval (file IPC)
         _handle_mcp_approval(cb, token)
         return
@@ -532,7 +445,6 @@ Commands:
   /start  — greeting
   /help   — this message
   /reset  — clear conversation memory in this chat
-  /model  — list LM Studio models and switch the active one
 """
 
 
@@ -573,18 +485,11 @@ def _run_for_chat(checkpointer, chat_id: str, text: str,
             )
         except _LLMUnavailable as e:
             answer = ("⚠️ The local LLM server is unreachable "
-                      "(is the Mac awake and LM Studio running?). "
+                      "(is the Mac awake and Strata running?). "
                       "Monitors and alerts keep working — only chat needs "
                       f"the model.\n\ndetail: {e}")
         except Exception as e:
             answer = f"❌ Internal error: {type(e).__name__}: {e}"
-            # LM Studio's MLX engine reports a model it can't execute as
-            # "Compute error" on the predict stream — that's the model, not
-            # the question. Tell the operator the one action that fixes it.
-            if "Compute error" in str(e) or "predict stream" in str(e):
-                answer += (f"\n\n⚠️ The active model ({_get_active_model()}) "
-                           "can't run on the LLM server. Send /model and "
-                           "pick a different one.")
             print(f"[bot] agent error in chat {chat_id}: {type(e).__name__}: {e}")
         finally:
             stop_typing.set()
@@ -627,10 +532,6 @@ def _handle_message(checkpointer, msg: dict) -> None:
         print("[bot]   → /reset")
         _reset_thread(chat_id)
         _send_message(chat_id, "Conversation memory reset.")
-        return
-    if cmd == "/model":
-        print("[bot]   → /model")
-        _send_model_picker(chat_id)
         return
 
     # Otherwise: send to agent in a worker thread, locked per chat

@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/LangGraph-1.x-1C3C3C?logo=langchain&logoColor=white" alt="LangGraph 1.x">
   <img src="https://img.shields.io/badge/MCP-streamable_HTTP-111111?logo=modelcontextprotocol&logoColor=white" alt="MCP server">
-  <img src="https://img.shields.io/badge/LLM-100%25_local_·_LM_Studio-FF6B35" alt="100% local LLM">
+  <img src="https://img.shields.io/badge/LLM-100%25_local_·_Strata-FF6B35" alt="100% local LLM">
   <img src="https://img.shields.io/badge/Langfuse-self--hosted-7C3AED" alt="Langfuse self-hosted">
   <img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white" alt="Pydantic v2">
@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/61a1c8c4-5873-426c-a629-a09e716ecd6f
     </td>
     <td width="50%" valign="top">
       <h4>🏠 100% local LLM</h4>
-      One model served by LM Studio (OpenAI-compatible) powers the agent loop <i>and</i> every helper. Marginal cost: <b>€0</b>. Switch models at runtime with Telegram <code>/model</code> — a <b>probe-before-switch</b> refuses any model the server can’t actually run.
+      One model — Qwen3.8-Flash-Next served by <b>Strata</b>, an open-source MoE engine, on the Mac’s Metal GPU — powers the agent loop <i>and</i> every helper. Marginal cost: <b>€0</b>. Moving off LM Studio was a two-line <code>.env</code> change; the runtime <code>/model</code> picker went with it, because one engine serves one model.
     </td>
   </tr>
   <tr>
@@ -67,7 +67,7 @@ https://github.com/user-attachments/assets/61a1c8c4-5873-426c-a629-a09e716ecd6f
   <tr>
     <td width="50%" valign="top">
       <h4>🧪 Measured, not assumed</h4>
-      <b>125 tests</b> (pytest + ruff) in GitHub Actions, plus <b>16 golden scenarios</b> that run the real graph against the live model (<a href="Agent_AI/evals/"><code>evals/</code></a>). The one long-standing eval “failure” was root-caused to a stale test, not the model.
+      <b>130 tests</b> (pytest + ruff) in GitHub Actions, plus <b>16 golden scenarios</b> that run the real graph against the live model (<a href="Agent_AI/evals/"><code>evals/</code></a>). The one long-standing eval “failure” was root-caused to a stale test, not the model.
     </td>
     <td width="50%" valign="top">
       <h4>🚨 The watcher is watched</h4>
@@ -105,7 +105,7 @@ flowchart TD
         CP[("💾 SqliteSaver<br/>checkpoints")]
     end
 
-    LLM["🏠 Local LLM · LM Studio<br/>OpenAI-compatible · /model switch<br/>agent loop + helpers · €0"]
+    LLM["🏠 Local LLM · Strata on Apple Silicon<br/>OpenAI-compatible · one model<br/>agent loop + helpers · €0"]
     LF["📊 Langfuse<br/>self-hosted traces"]
 
     subgraph TL["🧰 registry.py · one tool catalog"]
@@ -146,14 +146,14 @@ The whole design turns on one split:
 
 ### Local-first economics
 
-Earlier versions ran a hybrid: a cloud model for reasoning plus a second local model for summaries. Both the cloud dependency and the second moving part were removed **on purpose** — today there is exactly **one** language model in the system, local and swappable at runtime.
+Earlier versions ran a hybrid: a cloud model for reasoning plus a second local model for summaries. Both the cloud dependency and the second moving part were removed **on purpose** — today there is exactly **one** language model in the system, local and swappable with one config change.
 
 | | Before (hybrid) | Now (single local LLM) |
 |---|---|---|
 | **Reasoning + tool calls** | Cloud API (~$0.005 / chat) | Local model · **€0** |
 | **Summaries / RAG / voice** | Second local model | The *same* local model |
 | **Failure modes** | Two servers, two auth paths | One server; monitors stay deterministic if it’s down |
-| **Model choice** | Code change | Telegram `/model` + probe-before-switch |
+| **Model choice** | Code change | Two `.env` lines — LM Studio → Strata took exactly that |
 
 <a id="gate"></a>
 
@@ -235,6 +235,7 @@ Each monitor exposes the **same function three ways** — an agent `@tool`, a CL
 - **Commute guard** (`db_train_monitor.py`) — polls the MVG departures API for the S-Bahn and feeder bus during the morning window; delays and cancellations are announced on the Echo. State-tracked, so it re-announces only when the delay *changes*.
 - **Finance bridge** (`finance_server.py` + `firefly_client.py`) — a bank-app push notification is caught by Home Assistant, POSTed to a FastAPI bridge, parsed (amount / merchant / direction) and filed as a draft transaction in **Firefly III**.
 - **Voice** — *“Alexa, system status”* → Alexa Routine → HA automation → `POST /voice` → `voice.handle_intent()` → local LLM → the Echo speaks. Amazon does the speech-to-text; the voice path is **read-only by construction**. See [`docs/voice-setup.md`](Agent_AI/docs/voice-setup.md).
+- **Indian List** (`list_server.py` + `sentinel_list.py`) — *“Alexa, tell Indian List to add milk”*: an Alexa custom skill and a phone checklist page share one list, with an Excel copy written by the standard library. It is the only Sentinel service reachable from the internet — through its own Cloudflare tunnel — and it refuses to start without its secrets, which it compares in constant time.
 
 </details>
 
@@ -256,10 +257,11 @@ A demo agent and an agent that pages you at 3 a.m. are different products. These
 | 🔔 | The same alert repeated on every run | Transition paging: one DOWN, one RECOVERED, a 6-hour reminder, quiet hours for non-critical — [`alert_state.py`](Agent_AI/alert_state.py) |
 | 📡 | ESP32 devices could drop off unnoticed | ESPHome online/offline watch through Home Assistant, with a grace period for OTA reboots — [`esphome_monitor.py`](Agent_AI/esphome_monitor.py) |
 | 🖥️ | Nothing watched VM/LXC state | Guest monitor: every VM/LXC, running state and real memory — [`guest_monitor.py`](Agent_AI/guest_monitor.py) |
+| 🔁 | The model engine changed: LM Studio → Strata, which serves exactly one model | `/model` picker, probe and runtime override deleted — dead switching code is how one global setting breaks the agent *and* every monitor at once — [`models.py`](Agent_AI/models.py) |
 | ⛔ | A “never restart” policy was only advisory | `restart_policy: never` enforced in code, even after an approval — [`test_alerting.py`](Agent_AI/tests/test_alerting.py) |
 
 > [!NOTE]
-> This repository is a **sanitized mirror** of the live system (private IPs → `*.lan`, names and credentials → placeholders). Everything above ships here: **32 tools and 125 tests**, green in CI. The review behind these changes is §6 of [`ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md).
+> This repository is a **sanitized mirror** of the live system (private IPs → `*.lan`, names and credentials → placeholders). Everything above ships here: **33 tools and 130 tests**, green in CI. The review behind these changes is §6–7 of [`ARCHITECTURE.md`](Agent_AI/docs/ARCHITECTURE.md).
 
 ## 🗂️ Project layout
 
@@ -270,12 +272,13 @@ AI-Agent/
 └── Agent_AI/                 ← the agent (full source)
     ├── README.md             ← module map + run guide
     ├── agent_v5_approval.py  ← the production brain (graph + gate)
-    ├── registry.py           ← all 32 @tool definitions, one catalog
+    ├── registry.py           ← all 33 @tool definitions, one catalog
     ├── mcp_server.py         ← MCP over streamable HTTP, server-side gate
     ├── legacy/               ← the 5-lesson course (v1 → v4 archive)
     ├── sentinel_bot.py       ← Telegram bot (long-running)
     ├── voice_server.py · voice.py               ← Alexa bridge
     ├── finance_server.py · finance_parser.py · firefly_client.py
+    ├── list_server.py · sentinel_list.py        ← Indian List (Alexa skill + phone page)
     ├── models.py             ← single-LLM factory (local, OpenAI-compatible)
     ├── catalog.py            ← pydantic-validated inventory + policy loader
     ├── tools.py              ← Proxmox / HA / Telegram integration + gate
@@ -290,7 +293,7 @@ AI-Agent/
     ├── evals/                ← golden scenarios + runner (live model)
     ├── tests/                ← pytest: policy gate, clients, MCP, evals
     ├── docs/                 ← runbook · services · voice setup · ARCHITECTURE.md
-    ├── systemd/              ← 4 services + 11 timers + OnFailure alert template
+    ├── systemd/              ← 5 services + 11 timers + OnFailure alert template
     ├── .env.example          ← config template (copy → .env)
     └── catalog.example.yaml  ← inventory template (copy → catalog.yaml)
 ```
@@ -315,7 +318,7 @@ Full details in [`Agent_AI/README.md`](Agent_AI/README.md).
 
 ## 🧰 Tech stack
 
-`Python 3.14` · `LangGraph` · `langchain-core` · **local LLM** via LM Studio (OpenAI-compatible) · `MCP` · `Langfuse` (self-hosted) · `FastAPI` · `Pydantic v2` · `SQLite` checkpointer · `systemd` · `Proxmox API` · `Home Assistant API` · `Portainer` · `Telegram Bot API` · `Firefly III` · MVG departures API · BM25 RAG · `pytest` · `ruff` · GitHub Actions.
+`Python 3.14` · `LangGraph` · `langchain-core` · **local LLM** via Strata (Qwen3.8-Flash-Next on Metal, OpenAI-compatible) · `MCP` · `Langfuse` (self-hosted) · `FastAPI` · `Pydantic v2` · `SQLite` checkpointer · `systemd` · `Proxmox API` · `Home Assistant API` · `Portainer` · `Telegram Bot API` · Alexa custom skill · Cloudflare Tunnel · `Firefly III` · MVG departures API · BM25 RAG · `pytest` · `ruff` · GitHub Actions.
 
 ## 🔐 Security & secrets
 
